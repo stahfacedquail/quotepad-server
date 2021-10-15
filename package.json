@@ -18,6 +18,10 @@
   },
   "homepage": "https://github.com/stahfacedquail/quotepad-server#readme",
   "dependencies": {
-    "express": "^4.17.1"
+    "bookshelf": "^1.2.0",
+    "dotenv": "^10.0.0",
+    "express": "^4.17.1",
+    "knex": "^0.95.11",
+    "pg": "^8.7.1"
   }
 }
