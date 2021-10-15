@@ -1,0 +1,22 @@
+{
+  "name": "quotepad-server",
+  "version": "1.0.0",
+  "description": "Backend for QuotePad app",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stahfacedquail/quotepad-server.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/stahfacedquail/quotepad-server/issues"
+  },
+  "homepage": "https://github.com/stahfacedquail/quotepad-server#readme",
+  "dependencies": {
+    "express": "^4.17.1"
+  }
+}
