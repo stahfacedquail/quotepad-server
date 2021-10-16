@@ -109,11 +109,14 @@ const deleteQuote = (req, res) => {
             .destroy({ transacting: t, require: false })
             .then(() => {
                 return knex.raw(
-                    "SELECT quote_tags.tag_id, count(quote_tags.tag_id) " +
-                    "FROM tags LEFT JOIN quote_tags " +
-                    "ON tags.id = quote_tags.tag_id " +
-                    "GROUP BY quote_tags.tag_id " +
-                    "HAVING COUNT(quote_tags.tag_id) = 1;"
+                    "SELECT tag_id from quote_tags " +
+                    "WHERE tag_id IN (" +
+                        "SELECT quote_tags.tag_id " +
+                        "FROM tags LEFT JOIN quote_tags " +
+                        "ON tags.id = quote_tags.tag_id " +
+                        "GROUP BY quote_tags.tag_id " +
+                        "HAVING COUNT(quote_tags.tag_id) = 1" +
+                    `) AND quote_id = ${req.params.id};`
                 );
             })
             .then(quotelessTags => {
@@ -159,11 +162,14 @@ const deleteQuote = (req, res) => {
             .then(titleDeleted => {
                 if(titleDeleted) {
                     return knex.raw(
-                        "SELECT title_authors.author_id, COUNT(title_authors.author_id) " +
-                        "FROM authors LEFT JOIN title_authors " +
-                        "ON authors.id = title_authors.author_id " +
-                        "GROUP BY title_authors.author_id " +
-                        "HAVING COUNT(title_authors.author_id) = 1;"
+                        "SELECT author_id FROM title_authors " +
+                        "WHERE author_id IN (" +
+                            "SELECT title_authors.author_id " +
+                            "FROM authors LEFT JOIN title_authors " +
+                            "ON authors.id = title_authors.author_id " +
+                            "GROUP BY title_authors.author_id " +
+                            "HAVING COUNT(title_authors.author_id) = 1" +
+                        `) AND title_id = ${quoteToBeDeleted.title_id}`
                     );
                 }
 
