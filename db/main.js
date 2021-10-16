@@ -9,12 +9,24 @@ const TitleType = bookshelf.model("TitleType", {
     tableName: "title_types"
 });
 
+const TitleTypes = bookshelf.collection("TitleTypes", {
+    model: TitleType
+});
+
 const Author = bookshelf.model("Author", {
     tableName: "authors"
 });
 
+const Authors = bookshelf.collection("Authors", {
+    model: Author
+});
+
 const Tag = bookshelf.model("Tag", {
     tableName: "tags"
+});
+
+const Tags = bookshelf.collection("Tags", {
+    model: Tag
 });
 
 const Title = bookshelf.model("Title", {
@@ -27,6 +39,10 @@ const Title = bookshelf.model("Title", {
     }
 });
 
+const Titles = bookshelf.collection("Titles", {
+    model: Title
+});
+
 const Quote = bookshelf.model("Quote", {
     tableName: "quotes",
     title() {
@@ -37,10 +53,19 @@ const Quote = bookshelf.model("Quote", {
     }
 });
 
+const Quotes = bookshelf.collection("Quotes", {
+    model: Quote
+});
+
 module.exports = {
     TitleType,
+    TitleTypes,
     Author,
+    Authors,
     Title,
+    Titles,
     Tag,
-    Quote
+    Tags,
+    Quote,
+    Quotes
 };

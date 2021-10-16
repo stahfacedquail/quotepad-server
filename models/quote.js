@@ -1,3 +1,5 @@
+const NUM_RECENT_QUOTES = 5;
+
 const findQuoteById = (req, res) => {
     if(req.query) {
         if(req.query.full)
@@ -43,6 +45,34 @@ const getQuoteWithAllAttributes = (req, res) => {
     })
 };
 
+const getQuotes = (req, res) => {
+    let getQuotesPromise;
+
+    if(req.query.recent)
+        getQuotesPromise = new db.Quotes()
+            .orderBy("date_added", "DESC")
+            .query(qb => qb.limit(NUM_RECENT_QUOTES))
+            .fetch();
+        
+    else if(req.query.favourite)
+        getQuotesPromise = new db.Quotes()
+            .query(qb => qb.where({ is_favourite: true }))
+            .fetch();
+    
+    else if(req.query.titleId)
+        getQuotesPromise = new db.Quotes()
+            .query(qb => qb.where({ title_id: req.query.titleId }))
+            .fetch();
+
+    else
+        getQuotesPromise = new db.Quotes().fetch();
+
+    getQuotesPromise
+    .then(quotes => res.send(quotes.toJSON()))
+    .catch(error => res.send(error));
+};
+
 module.exports = {
-    findQuoteById
+    findQuoteById,
+    getQuotes
 };
