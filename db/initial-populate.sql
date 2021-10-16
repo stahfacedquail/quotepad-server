@@ -71,7 +71,9 @@ INSERT INTO tags(value) VALUES
     ('masculinity'),
     ('LGBTQIA+'),
     ('inspiration'),
-    ('sleep');
+    ('sleep'),
+	('philosophy'),
+	('the heart');
 	
 INSERT INTO titles(value, type_id, url) VALUES
 	('The New Apartheid', 1, NULL),
@@ -149,6 +151,8 @@ INSERT INTO quote_tags(quote_id, tag_id) VALUES
 	(10,9),
 	(10,10),
 	(11,6),
+	(11,16),
+	(11,17),
 	(12,11),
 	(12,12),
 	(13,11),

@@ -1,5 +1,6 @@
 const express = require('express');
 const app = express();
+app.use(require("body-parser").json());
 
 if (process.env.NODE_ENV !== 'production') {
     require('dotenv').config();
@@ -17,10 +18,12 @@ app.get('/', (req, res) => {
     res.send("Landing page...");
 });
 
-app.get("/quotes/:id", quotes.findQuoteById);
+app.get("/quote/:id", quotes.findQuoteById);
 app.get("/quotes", quotes.getQuotes);
+app.patch("/quote/:id", quotes.updateQuote);
+app.delete("/quote/:id", quotes.deleteQuote);
 
-app.get("/titles/:id", titles.findTitleById);
+app.get("/title/:id", titles.findTitleById);
 app.get("/titles", titles.getTitles);
 
 app.get("/authors", authors.getAuthors)
@@ -34,14 +37,12 @@ app.listen(process.env.PORT, () => {
 });
 
 /*
-    updateQuote,
-    deleteQuote,
     createQuote
 
-    findQuoteById               --> /quotes/:id
-    findTitleById               --> /titles/:id
-    getQuoteWithAllAttributes   --> /quotes?full=true
-    joinTitleWithAuthors        --> /titles/:id?full=true
+    findQuoteById               --> /quote/:id
+    findTitleById               --> /title/:id
+    getQuoteWithAllAttributes   --> /quote/:id?full=true
+    joinTitleWithAuthors        --> /title/:id?full=true
     getRecentlyAddedQuotes      --> /quotes?recent=true
     getAllQuotes                --> /quotes
     getFavouriteQuotes          --> /quotes?favourite=true
@@ -51,4 +52,6 @@ app.listen(process.env.PORT, () => {
     getAllAuthors               --> /authors
     getAllTitleTypes            --> /types
     getAllTags                  --> /tags
+    updateQuote                 --> /quote/:id (PATCH)
+    deleteQuote                 --> /quote/:id (DELETE)
 */

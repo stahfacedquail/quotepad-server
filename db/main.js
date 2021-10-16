@@ -1,9 +1,13 @@
-const pg = require('knex')({
+const pg = require("knex")({
     client: 'pg',
     connection: process.env.DATABASE_URL
 });
 
+global.knex = pg;
+
 const bookshelf = require("bookshelf")(pg);
+
+global.bookshelf = bookshelf;
 
 const TitleType = bookshelf.model("TitleType", {
     tableName: "title_types"
@@ -57,6 +61,14 @@ const Quotes = bookshelf.collection("Quotes", {
     model: Quote
 });
 
+const QuoteTag = bookshelf.model("QuoteTag", {
+    tableName: "quote_tags"
+});
+
+const TitleAuthor = bookshelf.model("TitleAuthor", {
+    tableName: "title_authors"
+});
+
 module.exports = {
     TitleType,
     TitleTypes,
@@ -67,5 +79,9 @@ module.exports = {
     Tag,
     Tags,
     Quote,
-    Quotes
+    Quotes,
+    QuoteTag,
+    TitleAuthor,
+
+    transaction: bookshelf.transaction
 };
