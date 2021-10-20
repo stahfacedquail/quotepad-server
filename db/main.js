@@ -69,6 +69,10 @@ const TitleAuthor = bookshelf.model("TitleAuthor", {
     tableName: "title_authors"
 });
 
+const TitleAuthors = bookshelf.collection("TitleAuthors", {
+    model: TitleAuthor
+});
+
 module.exports = {
     TitleType,
     TitleTypes,
@@ -82,6 +86,7 @@ module.exports = {
     Quotes,
     QuoteTag,
     TitleAuthor,
+    TitleAuthors,
 
     transaction: bookshelf.transaction
 };

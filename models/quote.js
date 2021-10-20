@@ -1,4 +1,4 @@
-const { Tag, Title } = require("../db/main");
+const { Tag, Title, TitleAuthor } = require("../db/main");
 
 const NUM_RECENT_QUOTES = 5;
 
@@ -201,9 +201,137 @@ const deleteQuote = (req, res) => {
     });
 };
 
+const createQuote = (req, res) => {
+    /*  INCOMING:
+        let postObj = {
+        quote: {
+          text: this.quoteText,
+          title_id: "id" in this.chosenTitle ? this.chosenTitle.id : null
+        },
+        title: {
+          value: "value" in this.chosenTitle && this.chosenTitle.value.trim().length > 0 ? this.chosenTitle.value : null,
+          type_id: "id" in this.chosenType ? this.chosenType.id : null
+        },
+        authors: this.chosenAuthors,
+        tags: this.chosenTags
+        -- Each author/tag: { id: ...., value: .... }
+      }; ----> MODIFY to bring -1 instead of nulls for title, author and tag ids
+    */
+
+    //create non-existent title
+    //assign title id to quote
+    //create non-existent author(s)
+    //if new title: create title-author relationships
+    //else: create if new author added, delete if old author removed
+    //create quote
+    //OUTSTANDING: create non-existent tag(s)
+    //OUTSTANDING: create quote-tag relationships
+
+    bookshelf.transaction(t => {
+        return new Promise((resolve, reject) => {
+            if(req.body.quote.title_id >= 0) {
+                console.log("Existing title; on to the next step");
+                return resolve(null);
+            }
+
+            console.log("Title does not exist yet; create");
+
+            let titleObj = {};
+            titleObj.value = req.body.title.value;
+            if(req.body.title.type_id)
+                titleObj.type_id = req.body.title.type_id;
+
+            new db.Title().save(titleObj, { transacting: t })
+            .then(newTitle => resolve(newTitle.get("id")))
+            .catch(error => reject(error));
+        })
+        .then(newTitleId => {
+            console.log(newTitleId ? `Title ${newTitleId} created!` : "We are in the next step!");
+            if(newTitleId)
+                req.body.title.id = newTitleId;
+            
+            let newAuthors = req.body.authors.filter(author => author.id == -1);
+            console.log("Create new author entries", newAuthors);
+            return Promise.all(
+                newAuthors.map(newAuthor => new db.Author().save({ value: newAuthor.value }, { transacting: t }))
+            );
+        })
+        .then(newAuthors => {
+            console.log(`${newAuthors.length} new authors created`);
+            newAuthors = newAuthors.map(newAuthor => newAuthor.get("id"));
+
+            req.body.authors = req.body.authors.filter(author => author.id >= 0).map(author => author.id);
+            req.body.authors = req.body.authors.concat(newAuthors);
+            console.log("New and improved list of authors", req.body.authors);
+
+            if(req.body.quote.title_id >= 0) { //title existed before
+                //so if there are authors listed in the request but not on the db, create those relationships
+                //and if there are authors listed on the db who aren't on the request, delete those relationships
+                console.log("Because it's an already existing title, it's time to tango!");
+                return new db.TitleAuthors()
+                .where({ title_id: req.body.quote.title_id })
+                .fetch()
+                .then(titleAuthors => {
+                    titleAuthors = titleAuthors.toJSON();
+                    let existingAuthors = titleAuthors.map(titleAuthor => titleAuthor.author_id);
+                    
+                    //add: authors who appear in the incoming request but aren't in the db
+                    let authorsToAdd = req.body.authors.filter(author => !(existingAuthors.includes(author)));
+                    //delete: authors who appear in the db but not in the incoming request
+                    let authorsToRemove = existingAuthors.filter(author => !(req.body.authors.includes(author)));
+
+                    console.log("Authors to add", authorsToAdd);
+                    console.log("Authors to remove", authorsToRemove);
+
+                    return Promise.all([
+                        authorsToAdd.map(author => new db.TitleAuthor().save({
+                            title_id: req.body.quote.title_id,
+                            author_id: author
+                        }, { transacting: t })),
+
+                        authorsToRemove.map(author => new db.TitleAuthor().where({
+                            title_id: req.body.quote.title_id,
+                            author_id: author
+                        }).destroy({ transacting: t }))
+                    ]);
+                })
+            } else { //new title
+                //so just create the new title/author relationships
+                console.log("It's a brand new title, so let's set up some brand new relationships");
+                return Promise.all(
+                    req.body.authors.map(
+                        author => new db.TitleAuthor().save({
+                            title_id: req.body.title.id,
+                            author_id: author
+                        }, { transacting: t })
+                    )
+                );
+            }
+        })
+        .then(() => {
+            console.log("Nice!  And now for the biz de la biz: creating the quote!");
+            return new db.Quote().save({
+                text: req.body.quote.text,
+                title_id: req.body.title.id || req.body.quote.title_id,
+                date_added: new Date()
+            }, { transacting: t });
+        })
+        .then(newQuote => {
+            console.log("Quote creation done :)", newQuote.toJSON());
+            res.send(newQuote.toJSON());
+        })
+        .catch(error => {
+            console.log("ERROR!", error);
+            res.send(error);
+        });
+    });
+    
+};
+
 module.exports = {
     findQuoteById,
     getQuotes,
     updateQuote,
-    deleteQuote
+    deleteQuote,
+    createQuote
 };

@@ -22,6 +22,7 @@ app.get("/quote/:id", quotes.findQuoteById);
 app.get("/quotes", quotes.getQuotes);
 app.patch("/quote/:id", quotes.updateQuote);
 app.delete("/quote/:id", quotes.deleteQuote);
+app.post("/quote", quotes.createQuote);
 
 app.get("/title/:id", titles.findTitleById);
 app.get("/titles", titles.getTitles);
@@ -37,8 +38,6 @@ app.listen(process.env.PORT, () => {
 });
 
 /*
-    createQuote
-
     findQuoteById               --> /quote/:id
     findTitleById               --> /title/:id
     getQuoteWithAllAttributes   --> /quote/:id?full=true
@@ -54,4 +53,5 @@ app.listen(process.env.PORT, () => {
     getAllTags                  --> /tags
     updateQuote                 --> /quote/:id (PATCH)
     deleteQuote                 --> /quote/:id (DELETE)
+    createQuote                 --> /quote (POST)
 */
