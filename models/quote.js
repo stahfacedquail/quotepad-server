@@ -222,10 +222,11 @@ const createQuote = (req, res) => {
     //assign title id to quote
     //create non-existent author(s)
     //if new title: create title-author relationships
-    //else: create if new author added, delete if old author removed
+    //else: create if new author added, delete if old author removed [OUTSTANDING: Check if author is still worth keeping]
     //create quote
-    //OUTSTANDING: create non-existent tag(s)
-    //OUTSTANDING: create quote-tag relationships
+    //create non-existent tag(s)
+    //create quote-tag relationships
+    //[OUTSTANDING: Can't cope with a titleless quote...]
 
     bookshelf.transaction(t => {
         return new Promise((resolve, reject) => {
@@ -317,12 +318,40 @@ const createQuote = (req, res) => {
             }, { transacting: t });
         })
         .then(newQuote => {
-            console.log("Quote creation done :)", newQuote.toJSON());
-            res.send(newQuote.toJSON());
+            newQuote = newQuote.toJSON();
+            console.log("Quote creation done :)", newQuote);
+            req.body.quote.id = newQuote.id;
+            
+            let newTags = req.body.tags.filter(tag => tag.id == -1);
+            return Promise.all(
+                newTags.map(tag => new db.Tag().save({ value: tag.value }, { transacting: t }))
+            );
+        })
+        .then(newTags => {
+            newTags = newTags.map(tag => { 
+                return {
+                    quote_id: req.body.quote.id,
+                    tag_id: tag.get("id")
+                }
+            });
+
+            let tagsToAssociateWithQuote = req.body.tags.filter(tag => tag.id >= 0).map(tag => { 
+                return {
+                    quote_id: req.body.quote.id,
+                    tag_id: tag.id 
+                }
+            });
+            tagsToAssociateWithQuote = tagsToAssociateWithQuote.concat(newTags);
+
+            return Promise.all(tagsToAssociateWithQuote.map(tag => new db.QuoteTag().save(tag, { transacting: t })));
+        })
+        .then(() => {
+            console.log("Finito!");
+            res.status(200).send("All good :)");
         })
         .catch(error => {
             console.log("ERROR!", error);
-            res.send(error);
+            res.status(500).send(error);
         });
     });
     
