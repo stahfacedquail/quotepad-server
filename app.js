@@ -6,10 +6,13 @@ if (process.env.NODE_ENV !== 'production') {
     require('dotenv').config();
 }
 
-app.use(function(req, res, next) {
-    res.set('Access-Control-Allow-Origin', process.env.REQ_ORIGIN)
-    next();
-});
+if(process.env.NODE_ENV == 'production') {
+    app.use(function(req, res, next) {
+        res.set('Access-Control-Allow-Origin', process.env.REQ_ORIGIN);
+        res.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE');
+        next();
+    });
+}
 
 global.db = require("./db/main.js");
 
