@@ -101,13 +101,17 @@ const deleteQuote = (req, res) => {
     };
 
     new db.Quote({ id: req.params.id }).fetch()
-    .then(obj => quoteToBeDeleted = obj.toJSON())
+    .then(obj => {
+        quoteToBeDeleted = obj.toJSON()
+        console.log("Step 1: Quote to be deleted", quoteToBeDeleted);
+    })
     .then(() => {
         return bookshelf.transaction(t => {
             return new db.QuoteTag()
             .where({ quote_id: req.params.id })
             .destroy({ transacting: t, require: false })
             .then(() => {
+                console.log("Quote-tag associations deleted");
                 return knex.raw(
                     "SELECT tag_id from quote_tags " +
                     "WHERE tag_id IN (" +
@@ -121,6 +125,7 @@ const deleteQuote = (req, res) => {
             })
             .then(quotelessTags => {
                 quotelessTags = quotelessTags.rows;
+                console.log("Delete these quoteless tags", quotelessTags)
 
                 if(quotelessTags.length == 0)
                     return new Promise(resolve => resolve(null));
@@ -134,14 +139,16 @@ const deleteQuote = (req, res) => {
                 return Promise.all(quotelessTags);
             })
             .then(() => {
+                console.log("Quoteless tags deleted; next - delete quote");
                 return new db.Quote()
-                .where({ id: req.params.id })
-                .destroy({ transacting: t });
+                    .where({ id: req.params.id })
+                    .destroy({ transacting: t });
             })
             .then(() => {
+                console.log("Count how many quotes are left in the title");
                 return new db.Quote()
-                .where({ title_id: quoteToBeDeleted.title_id })
-                .count("id");
+                    .where({ title_id: quoteToBeDeleted.title_id })
+                    .count("id");
             })
             .then(numQuotesInTitle => {
                 console.log(`Number of quotes in title ${quoteToBeDeleted.title_id}`, numQuotesInTitle);
@@ -151,9 +158,12 @@ const deleteQuote = (req, res) => {
 
                     return new db.TitleAuthor()
                         .where({ title_id: quoteToBeDeleted.title_id })
-                        .destroy({ transacting: t})
+                        .destroy({ transacting: t, require: false })
                         .then(() => {
-                            return new Title({ id: quoteToBeDeleted.title_id }).destroy({ transacting: t});
+                            console.log("Title-author relationships deleted; next - delete title");
+                            return new Title()
+                                .where({ id: quoteToBeDeleted.title_id })
+                                .destroy({ transacting: t});
                         });
                 }
 
@@ -161,6 +171,7 @@ const deleteQuote = (req, res) => {
             })
             .then(titleDeleted => {
                 if(titleDeleted) {
+                    console.log("Title deleted");
                     return knex.raw(
                         "SELECT author_id FROM title_authors " +
                         "WHERE author_id IN (" +
@@ -176,11 +187,12 @@ const deleteQuote = (req, res) => {
                 return new Promise(resolve => resolve(null));
             })
             .then((titlelessAuthors) => {
+                console.log("Delete titlelessAuthors", titlelessAuthors);
                 if(titlelessAuthors && titlelessAuthors.rows.length > 0) {
                     titlelessAuthors = titlelessAuthors.rows.map(author =>
                         new db.Author()
                         .where({ id: author.author_id })
-                        .destroy({ transacting: t})
+                        .destroy({ transacting: t })
                     );
 
                     return Promise.all(titlelessAuthors);
@@ -191,6 +203,7 @@ const deleteQuote = (req, res) => {
         });
     })
     .then(() => {
+        console.log("Done doner donest!");
         res.send(returnObj);
     })
     .catch(error => {
