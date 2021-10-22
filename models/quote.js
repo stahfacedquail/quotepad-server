@@ -197,6 +197,7 @@ const deleteQuote = (req, res) => {
         console.log("ERROR!", error);
         returnObj.success = false;
         returnObj.error = error;
+        returnObj.hey = `Quote ${req.params.id} not found??`;
         res.send(returnObj);
     });
 };
