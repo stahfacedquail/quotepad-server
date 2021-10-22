@@ -49,7 +49,7 @@ app.listen(process.env.PORT, () => {
 /*
     findQuoteById               --> /quote/:id
     findTitleById               --> /title/:id
-    getQuoteWithAllAttributes   --> /quote/:id?full=true
+    getQuoteWithAllAttributes   --> 
     joinTitleWithAuthors        --> /title/:id?full=true
     getRecentlyAddedQuotes      --> /quotes?recent=true
     getAllQuotes                --> /quotes

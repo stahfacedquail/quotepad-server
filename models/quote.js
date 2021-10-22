@@ -29,15 +29,20 @@ const getQuoteWithAllAttributes = (req, res) => {
         if(quote.related("title")) {
             return new db.Title({ id: quote.related("title").get("id") })
                 .fetch({ require: false, withRelated: [ "type", "authors" ]});
+        } else {
+            return new Promise(resolve => {
+                resolve({
+                    emptyType: null,
+                    emptyAuthors: []
+                });
+            });
         }
-        
-        return new Promise(resolve => resolve(null));
     })
     .then(titleWithTypeAndAuthors => {
         if(titleWithTypeAndAuthors) {
-            _returnObj.title.type = titleWithTypeAndAuthors.related("type").toJSON();
+            _returnObj.title.type = titleWithTypeAndAuthors.emptyType || titleWithTypeAndAuthors.related("type").toJSON();
 
-            _returnObj.authors = titleWithTypeAndAuthors.related("authors").toJSON();
+            _returnObj.authors = titleWithTypeAndAuthors.emptyAuthors || titleWithTypeAndAuthors.related("authors").toJSON();
         }
             
         res.send(_returnObj);
