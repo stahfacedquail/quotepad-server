@@ -10,6 +10,7 @@ if(process.env.NODE_ENV == 'production') {
     app.use(function(req, res, next) {
         res.set('Access-Control-Allow-Origin', process.env.REQ_ORIGIN);
         res.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE');
+        res.set('Access-Control-Allow-Headers', 'Content-Type');
         next();
     });
 }
