@@ -6,6 +6,11 @@ if (process.env.NODE_ENV !== 'production') {
     require('dotenv').config();
 }
 
+app.use(function(req, res, next) {
+    res.set('Access-Control-Allow-Origin', process.env.REQ_ORIGIN)
+    next();
+});
+
 global.db = require("./db/main.js");
 
 const quotes = require("./models/quote.js");
