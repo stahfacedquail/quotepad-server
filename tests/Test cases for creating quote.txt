@@ -1,0 +1,26 @@
+Elements
+---------
+1. Quote
+2. Title: new | old | none
+3. Authors: new | old | none | new + old
+4. Tags: new | old | none | new + old [independent]
+
+Case 1: new title, new authors
+Case 2: new title, old authors
+Case 3: new title, no authors
+Case 4: new title, new + old authors
+Case 5.1: old title (with authors), old + new authors added
+Case 5.2: old title (with authors), no authors
+Case 5.3: old title (w/o authors), old + new authors added
+Case 5.4: old title (w/o authors), no authors [stays the same]
+Case 6: old title, same authors
+Case 7: no title, new authors
+Case 8: no title, old authors
+Case 9: no title, new + old authors
+Case 10: no title, no authors
+
+Tags
+New -- Case 1 (1), 4 (2), 9 (4)
+Old -- Case 2 (1), 3 (2), 5.2 (4), 7 (8)
+New + old -- Case 5.4 (1 + 3), 6 (1 + 1), 8 (3 + 2)
+None -- Case 5.1, 5.3, 10

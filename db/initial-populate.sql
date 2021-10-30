@@ -1,4 +1,5 @@
 DROP TABLE quote_tags;
+DROP TABLE quote_authors;
 DROP TABLE title_authors;
 DROP TABLE tags;
 DROP TABLE quotes;
@@ -46,6 +47,12 @@ CREATE TABLE title_authors (
 	title_id integer NOT NULL REFERENCES titles(id),
 	author_id integer NOT NULL REFERENCES authors(id),
 	PRIMARY KEY(title_id, author_id)
+);
+
+CREATE TABLE quote_authors (
+	quote_id integer NOT NULL REFERENCES quotes(id),
+	author_id integer NOT NULL REFERENCES authors(id),
+	PRIMARY KEY(quote_id, author_id)
 );
 
 INSERT INTO title_types(value) VALUES

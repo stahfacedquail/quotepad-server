@@ -59,6 +59,9 @@ const Quote = bookshelf.model("Quote", {
     },
     tags() {
         return this.belongsToMany("Tag", "quote_tags");
+    },
+    authors() {
+        return this.belongsToMany("Author", "quote_authors");
     }
 });
 
@@ -78,6 +81,10 @@ const TitleAuthors = bookshelf.collection("TitleAuthors", {
     model: TitleAuthor
 });
 
+const QuoteAuthor = bookshelf.model("QuoteAuthor", {
+    tableName: "quote_authors"
+});
+
 module.exports = {
     TitleType,
     TitleTypes,
@@ -92,6 +99,7 @@ module.exports = {
     QuoteTag,
     TitleAuthor,
     TitleAuthors,
+    QuoteAuthor,
 
     transaction: bookshelf.transaction
 };
