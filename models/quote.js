@@ -220,24 +220,6 @@ const deleteQuote = (req, res) => {
                     If the deleted quote/title's author is on this list, it means that the deleted quote/title
                     was the only thing left attached to them, so they are now zombie authors */
 
-                let sqlstr = "SELECT DISTINCT author_id FROM (" +
-                    enquireAboutEmptyAuthorsBasedOnTitle +
-                    "SELECT author_id " +
-                    "FROM quote_authors " +
-                    `WHERE quote_id = ${req.params.id} ` +
-                ") AS authors_on_trial WHERE author_id IN " +
-                    "(SELECT author_id FROM " +
-                        "(   SELECT title_id as item_id, author_id " +
-                            "FROM title_authors " +
-                            "UNION ALL " +
-                            "SELECT quote_id as item_id, author_id " +
-                            "FROM quote_authors" +
-                        ") AS item_ids_per_author " +
-                    "GROUP BY author_id " +
-                    "HAVING COUNT(item_id) = 1" +
-                ");"
-                console.log(sqlstr);
-                //throw "Let's see...";
                 return knex.raw( "SELECT DISTINCT author_id FROM (" +
                         enquireAboutEmptyAuthorsBasedOnTitle +
                         "SELECT author_id " +
