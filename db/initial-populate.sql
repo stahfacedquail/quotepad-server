@@ -34,7 +34,7 @@ CREATE TABLE quotes (
 	text varchar(4095) NOT NULL,
 	title_id integer REFERENCES titles(id),
 	is_favourite boolean DEFAULT false,
-	date_added date
+	date_added timestamp
 );
 
 CREATE TABLE quote_tags (
