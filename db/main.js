@@ -73,6 +73,10 @@ const QuoteTag = bookshelf.model("QuoteTag", {
     tableName: "quote_tags"
 });
 
+const QuoteTags = bookshelf.collection("QuoteTags", {
+    model: QuoteTag
+});
+
 const TitleAuthor = bookshelf.model("TitleAuthor", {
     tableName: "title_authors"
 });
@@ -83,6 +87,14 @@ const TitleAuthors = bookshelf.collection("TitleAuthors", {
 
 const QuoteAuthor = bookshelf.model("QuoteAuthor", {
     tableName: "quote_authors"
+});
+
+const QuoteAuthors = bookshelf.collection("QuoteAuthors", {
+    model: QuoteAuthor
+});
+
+const Dummy = bookshelf.model("Dummy", {
+    tableName: "dummy"
 });
 
 module.exports = {
@@ -97,9 +109,12 @@ module.exports = {
     Quote,
     Quotes,
     QuoteTag,
+    QuoteTags,
     TitleAuthor,
     TitleAuthors,
     QuoteAuthor,
+    QuoteAuthors,
+    Dummy,
 
     transaction: bookshelf.transaction
 };

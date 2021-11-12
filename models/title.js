@@ -30,7 +30,25 @@ const getTitles = (req, res) => {
     .catch(error => res.send(error));
 };
 
+const createTitle = (props, transaction) => {
+    return new db.Title().save(props, { transacting: transaction });
+};
+
+const deleteTitle = (titleId, transaction) => {
+    return new db.TitleAuthor()
+        .where({ title_id: titleId })
+    .destroy({ transacting: transaction, require: false })
+    .then(() => {
+        console.log("Title-author relationships deleted; next - delete title");
+        return new db.Title()
+            .where({ id: titleId })
+        .destroy({ transacting: transaction });
+    });
+};
+
 module.exports = {
     findTitleById,
-    getTitles
+    getTitles,
+    createTitle,
+    deleteTitle
 };
