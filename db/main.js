@@ -93,10 +93,6 @@ const QuoteAuthors = bookshelf.collection("QuoteAuthors", {
     model: QuoteAuthor
 });
 
-const Dummy = bookshelf.model("Dummy", {
-    tableName: "dummy"
-});
-
 module.exports = {
     TitleType,
     TitleTypes,
@@ -114,7 +110,6 @@ module.exports = {
     TitleAuthors,
     QuoteAuthor,
     QuoteAuthors,
-    Dummy,
 
     transaction: bookshelf.transaction
 };
