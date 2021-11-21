@@ -476,7 +476,7 @@ const createQuote = details => {
             details.authors = details.authors.concat(newAuthors);
             //console.log("New and improved list of authors", details.authors);
 
-            return createQuoteBelongingRelationship(details.quote.id, details.title_id, details.authors, t)
+            return createQuoteBelongingRelationship(details.quote.id, details.title.id, details.authors, t, details.quote.title_id == -1)
             /* if(req.body.quote.title_id) {
                 if(req.body.quote.title_id >= 0) {
                     //1. if there are new authors [for this title], delete all title-author relationships for this title
@@ -645,7 +645,7 @@ const createQuoteAuthorEntry = (quoteId, authorId, trx) => {
     }, { transacting: trx });
 };
 
-const createQuoteBelongingRelationship = (quoteId, titleId, incomingAuthors, trx) => {
+const createQuoteBelongingRelationship = (quoteId, titleId, incomingAuthors, trx, isNewTitle = false) => {
     if(titleId == null) {
         //create QuoteAuthor relationships
         return Promise.all(incomingAuthors.map(
@@ -720,10 +720,23 @@ const createQuoteBelongingRelationship = (quoteId, titleId, incomingAuthors, trx
                 });
             }
         } else { //no authors associated with the title
+            //if it's a new title, create title/author relationships
+            //else, create quote/author relationships
             //console.log("This title has no authors associated with it, so we will create quote-author relationships instead");
-            return Promise.all(incomingAuthors.map(
-                authorId => createQuoteAuthorEntry(quoteId, authorId, trx)
-            ))
+            return Promise.resolve(true)
+            .then(() => {
+                if(isNewTitle)
+                    return Promise.all(incomingAuthors.map(
+                        authorId => new db.TitleAuthor().save({
+                            title_id: titleId,
+                            author_id: authorId
+                        }, { transacting: trx })
+                    ));
+                else
+                    return Promise.all(incomingAuthors.map(
+                        authorId => createQuoteAuthorEntry(quoteId, authorId, trx)
+                    ));
+            })
             .then(() => {
                 //But maybe in the event of an update, the incoming authors are now in alignment with
                 //the other quotes' authors, so coalesce into title/author relationships, and destroy quote/author relationships

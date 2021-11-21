@@ -5,7 +5,7 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "test": "jest"
+    "test": "jest -b"
   },
   "repository": {
     "type": "git",
@@ -22,10 +22,8 @@
     "bookshelf": "^1.2.0",
     "dotenv": "^10.0.0",
     "express": "^4.17.1",
+    "jest": "^27.3.1",
     "knex": "^0.95.11",
     "pg": "^8.7.1"
-  },
-  "devDependencies": {
-    "jest": "^27.3.1"
   }
 }
