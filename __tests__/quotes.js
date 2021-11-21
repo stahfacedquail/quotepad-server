@@ -376,7 +376,7 @@ describe("Creates a quote", () => {
                 { "id": 1, "value": "New Tag 1" },
                 { "id": -1, "value": "New Tag 5" },
                 { "id": 3, "value": "New Tag 3" },
-                { "id": 2, "value": "New Tag 2" }
+                { "id": 4, "value": "New Tag 4" }
             ]
         };
     
