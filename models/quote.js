@@ -16,6 +16,21 @@ const processCreateQuoteRequest = (req, res) => {
     });
 };
 
+const processDeleteQuoteRequest = (req, res) => {
+    deleteQuote(req.params.id)
+    .then(returnObj => {
+        console.log("Done doner donest!");
+        res.status(200).send(returnObj);
+    })
+    .catch(error => {
+        console.log("ERROR!", error);
+        res.status(500).send({
+            success: false,
+            error: error
+        });
+    });
+}
+
 const findQuoteById = (req, res) => {
     if(req.query) {
         if(req.query.full)
@@ -40,7 +55,6 @@ const getQuoteWithAllAttributes = (req, res) => {
 
         quote = quote.toJSON();
         returnQuote = quote;
-        console.log("Quote before title fetch", quote);
         
         if(quote.title) {
             let relatedAttrs = [ "type" ];
@@ -230,7 +244,18 @@ const updateQuote = (req, res) => {
             } else { //Title unchanged
                 //Were author changes made?
                 if("authors" in req.body) {
-                    return createQuoteBelongingRelationship(req.params.id, originalQuote.title_id, req.body.authors, t);
+                    return createQuoteBelongingRelationship(req.params.id, originalQuote.title_id, req.body.authors, t)
+                    .then(() => {
+                        //Maybe in updating the authors, all the quotes in this title now have the same authors?
+                        return checkIfQuoteAuthorsInTitleAlign(req.body.title_id, t);
+                    })
+                    .then(theyAlign => {
+                        if(theyAlign)
+                            return coalesceQuoteAuthorIntoTitleAuthorAssociation(t, req.body.title_id, req.body.authors.map(author => author.id));
+        
+                        //else: the quotes have different authors to each other;
+                        //keep the relationships as quote/author relationships
+                    });
                 } else {
                     //No author updates; nothing further to be done
                 }
@@ -244,9 +269,8 @@ const updateQuote = (req, res) => {
                 else
                     return Promise.resolve(null);
             });
-        }).then(titleDeleted => {
-            //Clean up zombie authors
-            return Author.cleanUpZombieAuthors(req.params.id, t, titleDeleted);
+        }).then(() => {
+            return Author.cleanUpZombieAuthors(t);
         }).then(() => {
             if("tags" in req.body)
                 return createQuoteTagRelationships(req.params.id, req.body.tags, t, true);
@@ -260,7 +284,7 @@ const updateQuote = (req, res) => {
     });
 };
 
-const deleteQuote = (req, res) => {
+const deleteQuote = quoteId => {
     //delete quote-tags
     //search for zombie tags and delete
     //delete quote-authors
@@ -275,30 +299,26 @@ const deleteQuote = (req, res) => {
         lastQuoteInTitle: false
     };
 
-    new db.Quote({ id: req.params.id }).fetch()
+    return new db.Quote({ id: quoteId }).fetch()
     .then(obj => {
         quoteToBeDeleted = obj.toJSON()
-        console.log("Quote to be deleted", quoteToBeDeleted);
     })
     .then(() => {
         return bookshelf.transaction(t => {
             return new db.QuoteTag()
-                .where({ quote_id: req.params.id })
+                .where({ quote_id: quoteId })
             .destroy({ transacting: t, require: false })
             .then(() => {
-                console.log("Quote-tag associations deleted");
-                return Tag.cleanUpZombieTags();
+                return Tag.cleanUpZombieTags(t);
             })
             .then(() => {
-                console.log("Delete quote-author relationships");
                 return new db.QuoteAuthor()
-                    .where({ quote_id: req.params.id })
+                    .where({ quote_id: quoteId })
                     .destroy({ transacting: t, require: false });
             })
             .then(() => {
-                console.log("Delete quote");
                 return new db.Quote()
-                    .where({ id: req.params.id })
+                    .where({ id: quoteId })
                     .destroy({ transacting: t });
             })
             .then(() => {
@@ -306,118 +326,33 @@ const deleteQuote = (req, res) => {
                     return checkIfLastQuoteInTitle(quoteToBeDeleted.title_id)
                 else
                     return Promise.resolve(null);
-
-                /*if(quoteToBeDeleted.title_id) { //if the quote belonged title
-                    console.log("Count how many quotes are left in the title");
-                    return new db.Quote()
-                        .where({ title_id: quoteToBeDeleted.title_id })
-                    .count("id")
-                    .then(numQuotesInTitle => {
-                        console.log(`Number of quotes in title ${quoteToBeDeleted.title_id}`, numQuotesInTitle);
-        
-                        if(numQuotesInTitle == 1) { //the deleted quote was the last one in the title
-                            returnObj.lastQuoteInTitle = true;
-        
-                            return new db.TitleAuthor()
-                                .where({ title_id: quoteToBeDeleted.title_id })
-                                .destroy({ transacting: t, require: false });
-                        } else { //there are still other quotes in the title, so don't delete anything title-related
-                            return new Promise(resolve => resolve(null));
-                        }
-                    });
-                } else { //the quote didn't belong to a title, so we move on
-                    return new Promise(resolve => resolve(null));
-                }*/
             })
             .then(isLastQuoteInTitle => {
                 if(isLastQuoteInTitle) {
                     returnObj.lastQuoteInTitle = true;
         
                     return Title.deleteTitle(quoteToBeDeleted.title_id, t);
-                    /*return new db.TitleAuthor()
-                        .where({ title_id: quoteToBeDeleted.title_id })
-                        .destroy({ transacting: t, require: false });*/
-                } else {
-                    return new Promise(resolve => resolve(null));
+                } else if(quoteToBeDeleted.title_id) {
+                    //this quote belonged to a title and there are other quotes in this title, and maybe in removing the quote,
+                    //we have removed the delinquent and now the rest of the quotes in this title have matching authors
+                    return checkIfQuoteAuthorsInTitleAlign(quoteToBeDeleted.title_id, t)
+                    .then(theyAlign => {
+                        if(theyAlign)
+                            return coalesceQuoteAuthorIntoTitleAuthorAssociation(t, quoteToBeDeleted.title_id);
+                        else
+                            return Promise.resolve(null);
+                    });
                 }
+
+                return Promise.resolve(null);
             })
-            /*.then(mustDeleteTitle => {
-                if(mustDeleteTitle) {
-                    console.log("Title-author relationships deleted; next - delete title");
-                    return new db.Title()
-                        .where({ id: quoteToBeDeleted.title_id })
-                        .destroy({ transacting: t });
-                }
-
-                return new Promise(resolve => resolve(null));
-            })*/
-            .then(titleDeleted => {
-                console.log(`${titleDeleted ? "Title deleted. " : ""}Count the number of titleless or quoteless authors`);
-
-                return Author.cleanUpZombieAuthors();
-                /*
-                let enquireAboutEmptyAuthorsBasedOnTitle = "";
-                if(titleDeleted) { //get all the authors of the title which was deleted 
-                    enquireAboutEmptyAuthorsBasedOnTitle += ("SELECT author_id " +
-                        "FROM title_authors " +
-                        `WHERE title_id = ${ parseInt(quoteToBeDeleted.title_id) } ` +
-                        
-                        "UNION ALL ");
-                }
-                
-                //    Maybe the authors weren't attached to the title though; maybe they were attached to the quote
-                //    In which case, also get all the authors that were attached to the quote deleted
-                //    Next, make a list of all authors in db + num items they are still attached to (be it a title or a quote)
-                //    and filter that list to those authors who only have 1 item left attached to them
-                //    If the deleted quote/title's author is on this list, it means that the deleted quote/title
-                //    was the only thing left attached to them, so they are now zombie authors
-
-                return knex.raw( "SELECT DISTINCT author_id FROM (" +
-                        enquireAboutEmptyAuthorsBasedOnTitle +
-                        "SELECT author_id " +
-                        "FROM quote_authors " +
-                        "WHERE quote_id = ? " +
-                    ") AS authors_on_trial WHERE author_id IN " +
-                        "(SELECT author_id FROM " +
-                            "(   SELECT title_id as item_id, author_id " +
-                                "FROM title_authors " +
-                                "UNION ALL " +
-                                "SELECT quote_id as item_id, author_id " +
-                                "FROM quote_authors" +
-                            ") AS item_ids_per_author " +
-                        "GROUP BY author_id " +
-                        "HAVING COUNT(item_id) = 1" +
-                    ");", [ req.params.id ]
-                );
+            .then(() => {
+                return Author.cleanUpZombieAuthors(t);
             })
-            .then((titlelessAuthors) => {
-                titlelessAuthors = titlelessAuthors.rows;
-                console.log(`Delete ${ titlelessAuthors.length } titlelessAuthors`);
-                console.log(titlelessAuthors);
-
-                if(titlelessAuthors.length > 0) {
-                    titlelessAuthors = titlelessAuthors.map(author =>
-                        new db.Author()
-                        .where({ id: author.author_id })
-                        .destroy({ transacting: t })
-                    );
-
-                    return Promise.all(titlelessAuthors);
-                }
-                
-                return new Promise(resolve => resolve(null));*/
+            .then(() => {
+                return Promise.resolve(returnObj);
             });
         });
-    })
-    .then(() => {
-        console.log("Done doner donest!");
-        res.send(returnObj);
-    })
-    .catch(error => {
-        console.log("ERROR!", error);
-        returnObj.success = false;
-        returnObj.error = error;
-        res.send(returnObj);
     });
 };
 
@@ -425,23 +360,18 @@ const createQuote = details => {
     return bookshelf.transaction(t => {
         return new Promise((resolve, reject) => {
             if(details.quote.title_id == null) {
-                //console.log("This quote does not belong to a title; on to the next step");
                 return resolve(null);
             }
 
             if(details.quote.title_id >= 0) {
-                //console.log("Existing title; on to the next step");
                 return resolve(details.quote.title_id);
             }
-
-            //console.log("Title does not exist yet; create");
 
             let titleObj = {};
             titleObj.value = details.title.value;
             if(details.title.type_id)
                 titleObj.type_id = details.title.type_id;
 
-            //new db.Title().save(titleObj, { transacting: t })
             Title.createTitle(titleObj, t)
             .then(newTitle => resolve(newTitle.get("id")))
             .catch(error => reject(error));
@@ -449,7 +379,6 @@ const createQuote = details => {
         .then(titleId => {
             details.title.id = titleId;
             
-            //console.log("Nice!  And now for the biz de la biz: creating the quote!");
             return new db.Quote().save({
                 text: details.quote.text,
                 title_id: details.title.id,
@@ -458,177 +387,32 @@ const createQuote = details => {
         })
         .then(newQuote => {
             newQuote = newQuote.toJSON();
-            //console.log("Quote creation done :)", newQuote);
             details.quote.id = newQuote.id;
 
             let newAuthors = details.authors.filter(author => author.id == -1);
-            //console.log("Create new author entries", newAuthors);
-            /*return Promise.all(
-                newAuthors.map(newAuthor => new db.Author().save({ value: newAuthor.value }, { transacting: t }))
-            );*/
             return Author.createAuthors(newAuthors, t);
         })
         .then(newAuthors => {
-            //console.log(`${newAuthors.length} new authors created`);
             newAuthors = newAuthors.map(newAuthor => newAuthor.get("id"));
 
             details.authors = details.authors.filter(author => author.id >= 0).map(author => author.id);
             details.authors = details.authors.concat(newAuthors);
-            //console.log("New and improved list of authors", details.authors);
 
             return createQuoteBelongingRelationship(details.quote.id, details.title.id, details.authors, t, details.quote.title_id == -1)
-            /* if(req.body.quote.title_id) {
-                if(req.body.quote.title_id >= 0) {
-                    //1. if there are new authors [for this title], delete all title-author relationships for this title
-                    //and allocate those authors to the existing quotes in the title
-                    //2. create quote-author relationships for new quote
-                    console.log("This is an existing title, and we need to check if the authors listed for it on the db match what's been sent");
-                    return new db.TitleAuthors()
-                    .where({ title_id: req.body.quote.title_id })
-                    .orderBy("author_id", "ASC")
-                    .fetch()
-                    .then(titleAuthors => {
-                        if(titleAuthors.length > 0) { //There are authors associated with the title
-                            titleAuthors = titleAuthors.toJSON();
-                            let existingAuthors = titleAuthors.map(titleAuthor => titleAuthor.author_id);
-                            let authorListsMatch = true;
-                            
-                            //Does the list of authors received match the list of existing authors?
-                            if(existingAuthors.length == req.body.authors.length) {
-                                req.body.authors.sort((authorX, authorY) => {
-                                    if(authorX > authorY) return 1;
-                                    if(authorX < authorY) return -1;
-                                    return 0;
-                                });
-
-                                for(let i = 0; authorListsMatch && i < existingAuthors.length; i++)
-                                    if(existingAuthors[i] != req.body.authors[i])
-                                        authorListsMatch = false;
-                            } else {
-                                authorListsMatch = false;
-                            }
-
-                            console.log("Existing authors for this title", existingAuthors);
-                            console.log(`Author lists ${authorListsMatch ? "do" : "don't"} match!`);
-
-                            if(authorListsMatch) {
-                                //no changes to be made here
-                                console.log("So no need to create quote-author relationships etc");
-                                return new Promise(resolve => resolve([]));
-                            } else {
-                                console.log("So we need to remove the title-author bond and change the relationships to quote-author relationships");
-                                //1. Fetch quotes under this title_id and create quote-author relationships using the existing authors for this title
-                                //2. Delete all title-author relationships for this title
-                                //3. Create quote-author relationship for new quote using req.body.authors
-                                return new db.Quotes()
-                                    .where({ title_id: req.body.quote.title_id })
-                                .fetch({ columns: "id" })
-                                .then(quotesInThisTitle => {
-                                    quotesInThisTitle = quotesInThisTitle.toJSON();
-
-                                    let quoteAuthorRelationships = [];
-                                    for(let i = 0; i < existingAuthors.length; i++)
-                                        quoteAuthorRelationships = quoteAuthorRelationships.concat(quotesInThisTitle.map(
-                                            quote => new db.QuoteAuthor().save({ 
-                                                quote_id: quote.id,
-                                                author_id: existingAuthors[i]
-                                            }, { transacting: t }))
-                                        );
-
-                                    return Promise.all(quoteAuthorRelationships);
-                                })
-                                .then(() => {
-                                    return new db.TitleAuthor()
-                                        .where({ title_id: req.body.quote.title_id })
-                                        .destroy({ transacting: t, require: false });
-                                })
-                                .then(() => {
-                                    return Promise.all(req.body.authors.map(author => 
-                                            new db.QuoteAuthor()
-                                            .save({
-                                                quote_id: req.body.quote.id,
-                                                author_id: author
-                                            }, { transacting: t })
-                                        )
-                                    );
-                                });
-                            }
-                        } else { //no authors associated with the title, so associate authors received with the quote directly
-                            console.log("This title has no authors associated with it, so we will create quote-author relationships instead");
-                            return Promise.all(req.body.authors.map(author => 
-                                new db.QuoteAuthor()
-                                .save({
-                                    quote_id: req.body.quote.id,
-                                    author_id: author
-                                }, { transacting: t }))
-                            );
-                        }
-                    });
-                } else { //new title
-                    //so just create the new title/author relationships
-                    console.log("It's a brand new title, so let's set up some brand new relationships");
-                    return Promise.all(
-                        req.body.authors.map(
-                            author => new db.TitleAuthor().save({
-                                title_id: req.body.title.id,
-                                author_id: author
-                            }, { transacting: t })
-                        )
-                    );
-                }
-            } else { //quote doesn't belong to a title
-                //create quote-author relationships
-                console.log("This quote does not belong to a title, so we will create quote-author relationships");
-                return Promise.all(req.body.authors.map(author =>
-                    new db.QuoteAuthor()
-                    .save({
-                        quote_id: req.body.quote.id,
-                        author_id: author
-                    }, { transacting: t })
-                ));
-            } */
         })
         .then(() => {
             return createQuoteTagRelationships(details.quote.id, details.tags, t);
-            
-            /* let newTags = req.body.tags.filter(tag => tag.id == -1);
-            console.log("Creating new tags", newTags);
-            return Promise.all(
-                newTags.map(tag => new db.Tag().save({ value: tag.value }, { transacting: t }))
-            );
-        })
-        .then(newTags => {
-            newTags = newTags.map(tag => { 
-                return {
-                    quote_id: req.body.quote.id,
-                    tag_id: tag.get("id")
-                }
-            });
-
-            let tagsToAssociateWithQuote = req.body.tags.filter(tag => tag.id >= 0).map(tag => { 
-                return {
-                    quote_id: req.body.quote.id,
-                    tag_id: tag.id 
-                }
-            });
-            tagsToAssociateWithQuote = tagsToAssociateWithQuote.concat(newTags);
-            console.log(`About to create ${tagsToAssociateWithQuote.length} quote-tag relationships`);
-
-            return Promise.all(tagsToAssociateWithQuote.map(tag => new db.QuoteTag().save(tag, { transacting: t }))); */
         });
     });
     
 };
 
 const checkIfLastQuoteInTitle = titleId => {
-    console.log("Count how many quotes are left in the title");
     return new Promise(resolve => {
         new db.Quote()
             .where({ title_id: titleId })
         .count("id")
         .then(numQuotesInTitle => {
-            console.log(`Number of quotes in title ${titleId}`, numQuotesInTitle);
-
             if(numQuotesInTitle == 1)
                 resolve(true);
             else
@@ -656,7 +440,6 @@ const createQuoteBelongingRelationship = (quoteId, titleId, incomingAuthors, trx
     //1. if there are new authors [for this title], delete all title-author relationships for this title
     //and allocate those authors to the existing quotes in the title
     //2. create quote-author relationships for new quote
-    //console.log("This is an existing title, and we need to check if the authors listed for it on the db match what's been sent");
     return new db.TitleAuthors()
     .where({ title_id: titleId })
     .orderBy("author_id", "ASC")
@@ -682,15 +465,10 @@ const createQuoteBelongingRelationship = (quoteId, titleId, incomingAuthors, trx
                 authorListsMatch = false;
             }
 
-            //console.log("Existing authors for this title", existingAuthors);
-            //console.log(`Author lists ${authorListsMatch ? "do" : "don't"} match!`);
-
             if(authorListsMatch) {
                 //no changes to be made here
-                //console.log("So no need to create quote-author relationships etc");
                 return new Promise(resolve => resolve([]));
             } else {
-                //console.log("So we need to remove the title-author bond and change the relationships to quote-author relationships");
                 //1. Fetch quotes under this title_id and create quote-author relationships using the existing authors for this title
                 //2. Delete all title-author relationships for this title
                 //3. Create quote-author relationship for new quote using req.body.authors
@@ -722,7 +500,6 @@ const createQuoteBelongingRelationship = (quoteId, titleId, incomingAuthors, trx
         } else { //no authors associated with the title
             //if it's a new title, create title/author relationships
             //else, create quote/author relationships
-            //console.log("This title has no authors associated with it, so we will create quote-author relationships instead");
             return Promise.resolve(true)
             .then(() => {
                 if(isNewTitle)
@@ -736,52 +513,6 @@ const createQuoteBelongingRelationship = (quoteId, titleId, incomingAuthors, trx
                     return Promise.all(incomingAuthors.map(
                         authorId => createQuoteAuthorEntry(quoteId, authorId, trx)
                     ));
-            })
-            .then(() => {
-                //But maybe in the event of an update, the incoming authors are now in alignment with
-                //the other quotes' authors, so coalesce into title/author relationships, and destroy quote/author relationships
-                //So let's check if the quote/author relationships are identical for all the quotes in this title
-                return trx.raw(
-                    `SELECT COUNT(*) FROM
-                    (SELECT quotes.id, COUNT(quote_authors.author_id) AS numAuthorsForQuote, (
-                            SELECT COUNT(DISTINCT quote_authors.author_id)
-                            FROM quotes LEFT JOIN quote_authors
-                            ON quotes.id = quote_authors.quote_id
-                            WHERE quotes.title_id = ?
-                        ) AS numAuthorsInTitle
-                    FROM quotes LEFT JOIN quote_authors
-                    ON quotes.id = quote_authors.quote_id
-                    WHERE quotes.title_id = ?
-                    GROUP BY quotes.id) AS subquotes
-                    WHERE numAuthorsForQuote <> numAuthorsInTitle;`, [ titleId, titleId ]
-                );
-            })
-            .then(numMismatches => {
-                if(numMismatches.rows.length == 0) {
-                    //the quotes all have the same set of authors now, so coalesce into title/author relationships
-                    //and destroy quote/author relationships
-                    new db.Quotes()
-                    .where({ title_id: titleId })
-                    .fetch({ columns: "id "})
-                    .then(quotes => {
-                        let destroyQuoteAuthor = quotes.toJSON().map(quote => new db.QuoteAuthor({
-                                quote_id: quote.id
-                            }).destroy({ transacting: trx })
-                        );
-                        let createTitleAuthor = incomingAuthors.map(authorId => new db.TitleAuthor().save({
-                            title_id: titleId,
-                            author_id: authorId
-                        }, { transacting: trx }));
-
-                        return Promise.all([
-                            destroyQuoteAuthor,
-                            createTitleAuthor
-                        ]);
-                    });
-                }
-
-                //else: the quotes have different authors to each other;
-                //keep the relationships as quote/author relationships
             });
         }
     });
@@ -815,14 +546,91 @@ const createQuoteTagRelationships = (quoteId, tags, trx, replace = false) => {
             }
         });
         tagsToAssociateWithQuote = tagsToAssociateWithQuote.concat(newTags);
-        //console.log(`About to create ${tagsToAssociateWithQuote.length} quote-tag relationships`);
 
         return Promise.all(tagsToAssociateWithQuote.map(
             tag => new db.QuoteTag().save(tag, { transacting: trx })
         ));
     }).then(() => {
         if(replace) //this wasn't a quote creation op; it was an update and some tags might have lost relevance
-            return Tag.cleanUpZombieTags();
+            return Tag.cleanUpZombieTags(trx);
+    });
+};
+
+const checkIfQuoteAuthorsInTitleAlign = (titleId, trx) => {
+    //1. make sure the title doesn't have authors linked to it (as opposed to linked to the quotes)
+    //2. the process is unnecessary if the quotes have 0 authors in total (only checking for this in the coalescing function)
+    return trx.raw(
+        `SELECT SUM(num_quote_authors) AS sum_quote_authors, SUM(total_num_title_authors) AS product_quote_nums_title_authors
+        FROM	(	SELECT quotes.id, quotes.title_id, COUNT(quote_authors.author_id) as num_quote_authors
+                    FROM quotes LEFT JOIN quote_authors
+                    ON quotes.id = quote_authors.quote_id
+                     WHERE quotes.title_id = ?
+                    GROUP BY quotes.id
+                ) AS quote_author_counts
+                INNER JOIN
+                (	SELECT author_owning_quotes.title_id, COUNT(DISTINCT quote_authors.author_id) AS total_num_title_authors
+                     FROM	(	SELECT quotes.id, quotes.title_id
+                                 FROM quotes
+                                 WHERE quotes.title_id NOT IN ( SELECT title_id FROM title_authors )
+                                 AND quotes.title_id = ?
+                            ) AS author_owning_quotes
+             
+                            INNER JOIN quote_authors
+                            ON author_owning_quotes.id = quote_authors.quote_id
+                    GROUP BY author_owning_quotes.title_id
+                ) AS title_author_counts
+        ON quote_author_counts.title_id = title_author_counts.title_id
+        GROUP BY quote_author_counts.title_id;`, [ titleId, titleId ]
+    )
+    .then(result => {
+        return Promise.resolve(result.rows.length > 0 ?
+            result.rows[0].sum_quote_authors == result.rows[0].product_quote_nums_title_authors : false);
+        //if the query doesn't return rows, there was some disqualification - maybe the title has authors
+        //associated with it directly.  In this case, return false -- the authors "don't align", i.e. don't
+        //change anything.  But if the authors do align, then yes, raise the flag for a coalescence to happen
+    });
+};
+
+const coalesceQuoteAuthorIntoTitleAuthorAssociation = (trx, titleId, authors) => {
+    return new Promise((resolve, reject) => {
+        if(authors)
+            resolve(authors);
+        else {
+            //fetch existing authors for this title from db
+            trx.raw(
+                "SELECT DISTINCT author_id " +
+                "FROM quotes INNER JOIN quote_authors " +
+                "ON quotes.id = quote_authors.quote_id " +
+                "WHERE quotes.title_id = ?;",
+            [ titleId ])
+            .then(authors => {
+                resolve(authors.rows.map(author => author.author_id));
+            })
+            .catch(error => reject(error));
+        }
+    })
+    .then(async incomingAuthors => {
+        if(incomingAuthors.length > 0) {
+            let quotes = await new db.Quotes()
+                .where({ title_id: titleId })
+                .fetch({ columns: "id", transacting: trx });
+        
+            let destroyQuoteAuthor = quotes.toJSON().map(quote => new db.QuoteAuthor().where({
+                    quote_id: quote.id
+                }).destroy({ transacting: trx })
+            );
+            let createTitleAuthor = incomingAuthors.map(authorId => new db.TitleAuthor().save({
+                title_id: titleId,
+                author_id: authorId
+            }, { transacting: trx }));
+
+            return Promise.all([
+                destroyQuoteAuthor,
+                createTitleAuthor
+            ]);
+        } 
+        
+        return Promise.resolve(null);
     });
 };
 
@@ -832,7 +640,9 @@ module.exports = {
     updateQuote,
     deleteQuote,
     processCreateQuoteRequest,
+    processDeleteQuoteRequest,
 
     //for testing
-    createQuote
+    createQuote,
+    deleteQuote
 };

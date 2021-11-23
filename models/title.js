@@ -39,7 +39,7 @@ const deleteTitle = (titleId, transaction) => {
         .where({ title_id: titleId })
     .destroy({ transacting: transaction, require: false })
     .then(() => {
-        console.log("Title-author relationships deleted; next - delete title");
+        //console.log("Title-author relationships deleted; next - delete title");
         return new db.Title()
             .where({ id: titleId })
         .destroy({ transacting: transaction });

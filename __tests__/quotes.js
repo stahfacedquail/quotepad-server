@@ -23,6 +23,36 @@ const getTitle = id => {
     .then(title => Promise.resolve(title.toJSON()));
 }
 
+const countElems = (elemType, values, field = "value") => {
+    switch(elemType) {
+        case "Title": elemType = new db.Title();
+            break;
+        case "Author": elemType = new db.Author();
+            break;
+        case "Tag": elemType = new db.Tag();
+            break;
+        case "Quote": elemType = new db.Quote();
+            break;
+        case "TitleAuthor": elemType = new db.TitleAuthor();
+            break;
+        case "QuoteAuthor": elemType = new db.QuoteAuthor();
+            break;
+        case "QuoteTag": elemType = new db.QuoteTag();
+    }
+
+    
+    let counter = elemType.query(qb => {
+        if(Array.isArray(values))
+            return qb.whereIn(field, values);
+        else
+            return qb.where({
+                [field]: values
+            });
+    });
+    
+    return counter.count().then(count => Promise.resolve(parseInt(count)));
+};
+
 beforeAll(() => {
     return knex.raw(`
         DROP TABLE quote_tags;
@@ -703,6 +733,258 @@ describe("Creates a quote", () => {
         });
     });
 });
+
+describe("Deletes a quote", () => {
+    test("where quote-related associations must be removed, but title, author and tag entities remain because they are still associated with other quotes", async () => {
+        await Quote.deleteQuote(1);
+
+        let quoteExists = await countElems("Quote", 1, "id");
+        expect(quoteExists).toBe(0);
+        
+        let numAuthorsRemaining = await countElems("Author", [ "New Author 1", "New Author 2", "New Author 3" ]);
+        expect(numAuthorsRemaining).toBe(3);
+
+        let numTitlesRemaining = await countElems("Title", [ "New Title 1" ]);
+        expect(numTitlesRemaining).toBe(1);
+
+        let numTagsRemaining = await countElems("Tag", [ "New Tag 1" ]);
+        expect(numTagsRemaining).toBe(1);
+    });
+
+    test("where the deletion leaves a zombie title which must be cleaned up", async () => {
+        await Quote.deleteQuote(6);
+
+        let quoteExists = await countElems("Quote", 6, "id");
+        expect(quoteExists).toBe(0);
+        
+        let numAuthorsRemaining = await countElems("Author", [ "New Author 1", "New Author 2", "New Author 3" ]);
+        expect(numAuthorsRemaining).toBe(3); //While these authors authored New Title 1, they are still associated with other quotes so they should not disappear
+
+        let numTitlesRemaining = await countElems("Title", [ "New Title 1" ]);
+        expect(numTitlesRemaining).toBe(0);
+
+        let numTagsRemaining = await countElems("Tag", [ "New Tag 1", "New Tag 2", "New Tag 3", "New Tag 4" ]);
+        expect(numTagsRemaining).toBe(4);
+    });
+
+    test("where zombie authors and zombie tags must be cleaned up", async () => {
+        await Quote.deleteQuote(16);
+
+        let quoteExists = await countElems("Quote", 16, "id");
+        expect(quoteExists).toBe(0);
+        
+        let numAuthorsRemaining = await countElems("Author", [ "New Author 1", "New Author 15", "New Author 16" ]);
+        expect(numAuthorsRemaining).toBe(1); //New Author 1 is still associated with other quotes; the others should be removed
+
+        let numTagsRemaining = await countElems("Tag", [ "New Tag 12", "New Tag 13", "New Tag 14", "New Tag 15" ]);
+        expect(numTagsRemaining).toBe(0);
+    });
+
+    test("(two quotes) where a zombie title (and the title/author associations) must ultimately be removed", async () => {
+        await Quote.deleteQuote(10);
+
+        let quoteExists = await countElems("Quote", 10, "id");
+        expect(quoteExists).toBe(0);
+        
+        let numAuthorsRemaining = await countElems("Author", "New Author 7");
+        expect(numAuthorsRemaining).toBe(1);
+
+        let numTitlesRemaining = await countElems("Title", "New Title 5");
+        expect(numTitlesRemaining).toBe(1);
+
+        let numTitleAuthorAssociations = await countElems("TitleAuthor", 5, "title_id");
+        expect(numTitleAuthorAssociations).toBe(1);
+
+        await Quote.deleteQuote(11);
+
+        quoteExists = await countElems("Quote", 11, "id");
+        expect(quoteExists).toBe(0);
+        
+        numAuthorsRemaining = await countElems("Author", "New Author 7");
+        expect(numAuthorsRemaining).toBe(1);
+
+        numTitlesRemaining = await countElems("Title", "New Title 5");
+        expect(numTitlesRemaining).toBe(0);
+
+        let numTagsRemaining = await countElems("Tag", [ "New Tag 3", "New Tag 6" ]);
+        expect(numTagsRemaining).toBe(2);
+    });
+
+    test("(two quotes) where a zombie title (and title/author associations) and some zombie authors must be removed", async () => {
+        await Quote.deleteQuote(12);
+
+        let quoteExists = await countElems("Quote", 12, "id");
+        expect(quoteExists).toBe(0);
+        
+        let numAuthorsRemaining = await countElems("Author", [3, 8, 11, 12, 13].map(i => `New Author ${i}`));
+        expect(numAuthorsRemaining).toBe(5);
+
+        let numTitlesRemaining = await countElems("Title", "New Title 6");
+        expect(numTitlesRemaining).toBe(1);
+
+        let numTitleAuthorAssociations = await countElems("TitleAuthor", 6, "title_id");
+        expect(numTitleAuthorAssociations).toBe(5);
+
+        let numTagsRemaining = await countElems("Tag", [ "New Tag 2", "New Tag 5" ]);
+        expect(numTagsRemaining).toBe(2);
+
+        await Quote.deleteQuote(13);
+
+        quoteExists = await countElems("Quote", 13, "id");
+        expect(quoteExists).toBe(0);
+        
+        numAuthorsRemaining = await countElems("Author", [3, 8, 11, 12, 13].map(i => `New Author ${i}`));
+        expect(numAuthorsRemaining).toBe(2);
+
+        numTitlesRemaining = await countElems("Title", "New Title 6");
+        expect(numTitlesRemaining).toBe(0);
+
+        numTagsRemaining = await countElems("Tag", [ "New Tag 7", "New Tag 5", "New Tag 8" ]);
+        expect(numTagsRemaining).toBe(3);
+    });
+
+    test("where the quote is the only data stored about that quote", async () => {
+        await Quote.deleteQuote(17);
+
+        let quoteExists = await countElems("Quote", 17, "id");
+        expect(quoteExists).toBe(0);
+    });
+
+    test("(two quotes) where a title must ultimately be deleted, as well as two zombie authors, and quote/author relationships must be coalesced into a title/author relationship", async () => {
+        await Quote.deleteQuote(9);
+
+        let quoteExists = await countElems("Quote", 9, "id");
+        expect(quoteExists).toBe(0);
+        
+        let numAuthorsRemaining = await countElems("Author", [ "New Author 6", "New Author 2", "New Author 7" ]);
+        expect(numAuthorsRemaining).toBe(3);
+
+        let numTitlesRemaining = await countElems("Title", "New Title 4");
+        expect(numTitlesRemaining).toBe(1);
+
+        let numTitleAuthorAssociations = await countElems("TitleAuthor", 4, "title_id");
+        expect(numTitleAuthorAssociations).toBe(6);
+
+        let numQuoteAuthorAssociations = await countElems("QuoteAuthor", 4, "quote_id");
+        expect(numQuoteAuthorAssociations).toBe(0);
+
+        await Quote.deleteQuote(4);
+
+        quoteExists = await countElems("Quote", 4, "id");
+        expect(quoteExists).toBe(0);
+        
+        numAuthorsRemaining = await countElems("Author", [1, 2, 4, 5, 6, 7].map(i => `New Author ${i}`));
+        expect(numAuthorsRemaining).toBe(4);
+
+        numTitlesRemaining = await countElems("Title", "New Title 4");
+        expect(numTitlesRemaining).toBe(0);
+
+        let numTagsRemaining = await countElems("Tag", [ "New Tag 3", "New Tag 4" ]);
+        expect(numTagsRemaining).toBe(2);
+    });
+
+    test("where a zombie author and some zombie tags must be removed", async () => {
+        await Quote.deleteQuote(14);
+
+        let quoteExists = await countElems("Quote", 14, "id");
+        expect(quoteExists).toBe(0);
+        
+        let numAuthorsRemaining = await countElems("Author", "New Author 14");
+        expect(numAuthorsRemaining).toBe(0);
+
+        let numTagsRemaining = await countElems("Tag", [1, 2, 3, 4, 5, 6, 7, 8].map(i => `New Tag ${i}`));
+        expect(numTagsRemaining).toBe(5);
+    });
+
+    test("where the quote to delete has authors attached to it but the remaining quotes in that title both have no authors (coalescing logic should not freak out)", async () => {
+        await Quote.deleteQuote(7);
+
+        let quoteExists = await countElems("Quote", 7, "id");
+        expect(quoteExists).toBe(0);
+
+        let numAuthorsRemaining = await countElems("Author", [ "New Author 5", "New Author 9", "New Author 10" ]);
+        expect(numAuthorsRemaining).toBe(2);
+    });
+
+    test("where coalescing the quotes into a title/author relationship must initially not be allowed, and then allowed", async () => {
+        const details1 = {
+            "quote": {
+                "text": "Test quote 18",
+                "title_id": 2
+            },
+            "title": {
+                "value": "New Title 2",
+                "type_id": 1
+            },
+            "authors": [
+                { "id": 1, "value": "New Author 1" },
+                { "id": 3, "value": "New Author 3" },
+                { "id": 4, "value": "New Author 4" },
+                { "id": 6, "value": "New Author 6" },
+                { "id": 8, "value": "New Author 8" }
+            ],
+            "tags": []
+        };
+
+        const details2 = {
+            "quote": {
+                "text": "Test quote 19",
+                "title_id": 2
+            },
+            "title": {
+                "value": "New Title 2",
+                "type_id": 1
+            },
+            "authors": [
+                { "id": 1, "value": "New Author 1" },
+                { "id": 3, "value": "New Author 3" },
+                { "id": 4, "value": "New Author 4" },
+                { "id": 6, "value": "New Author 6" },
+                { "id": 8, "value": "New Author 8" }
+            ],
+            "tags": []
+        };
+
+        await Quote.createQuote(details1);
+        await Quote.createQuote(details2);
+
+        await Quote.deleteQuote(19);
+
+        let quoteExists = await countElems("Quote", 19, "id");
+        expect(quoteExists).toBe(0);
+
+        let numAuthorsRemaining = await countElems("Author", [1, 3, 4, 6, 8].map(i => `New Author ${i}`));
+        expect(numAuthorsRemaining).toBe(5);
+
+        let numTitlesRemaining = await countElems("Title", "New Title 2");
+        expect(numTitlesRemaining).toBe(1);
+
+        let numTitleAuthorRships = await countElems("TitleAuthor", 2, "title_id");
+        expect(numTitleAuthorRships).toBe(0);
+
+        let numQuoteAuthorRships = await countElems("QuoteAuthor", [ 2, 5, 18 ], "quote_id");
+        expect(numQuoteAuthorRships).toBe(12);
+
+        await Quote.deleteQuote(2);
+
+        quoteExists = await countElems("Quote", 2, "id");
+        expect(quoteExists).toBe(0);
+
+        numAuthorsRemaining = await countElems("Author", [1, 3, 4, 6, 8].map(i => `New Author ${i}`));
+        expect(numAuthorsRemaining).toBe(5);
+
+        numTitlesRemaining = await countElems("Title", "New Title 2");
+        expect(numTitlesRemaining).toBe(1);
+
+        numTitleAuthorRships = await countElems("TitleAuthor", 2, "title_id");
+        expect(numTitleAuthorRships).toBe(5);
+
+        numQuoteAuthorRships = await countElems("QuoteAuthor", [ 5, 18 ], "quote_id");
+        expect(numQuoteAuthorRships).toBe(0);
+    });
+});
+
+//test update
 
 afterAll(() => {
     return knex.destroy();

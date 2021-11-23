@@ -28,7 +28,7 @@ app.get('/', (req, res) => {
 app.get("/quote/:id", quotes.findQuoteById);
 app.get("/quotes", quotes.getQuotes);
 app.patch("/quote/:id", quotes.updateQuote);
-app.delete("/quote/:id", quotes.deleteQuote);
+app.delete("/quote/:id", quotes.processDeleteQuoteRequest);
 app.post("/quote", quotes.processCreateQuoteRequest);
 
 app.get("/title/:id", titles.findTitleById);
