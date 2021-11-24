@@ -51,6 +51,8 @@ const countElems = (elemType, values, field = "value") => {
     });
     
     return counter.count().then(count => Promise.resolve(parseInt(count)));
+    //Be careful when using query builder as it will not parse numeric answers
+    //Find a way to initiliase pg with defaults.parseInt8 set to true??
 };
 
 beforeAll(() => {
