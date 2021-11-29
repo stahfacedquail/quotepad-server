@@ -29,7 +29,22 @@ const processDeleteQuoteRequest = (req, res) => {
             error: error
         });
     });
-}
+};
+
+const processUpdateQuoteRequest = (req, res) => {
+    let updateProcess;
+    if(is_favourite in req.body) {
+        updateProcess = updateIsFavourite(req.params.id, req.body.is_favourite);
+    } else
+        updateProcess = updateQuote(req.params.id, req.body);
+
+    updateProcess
+    .then(updatedModel => res.send(updatedModel.toJSON()))
+    .catch(error => {
+        console.log("ERROR", error);
+        res.send(error)
+    });
+};
 
 const findQuoteById = (req, res) => {
     if(req.query) {
@@ -116,27 +131,30 @@ const getQuotes = (req, res) => {
     });
 };
 
-const updateQuote = (req, res) => {
+const updateIsFavourite = (quoteId, fav) => {
+    return new db.Quote({ id: quoteId }).save({
+        is_favourite: fav
+    });
+};
+
+const updateQuote = (quoteId, qtUpdates) => {
     //scenarios:
     //--------------------------------
-    //1. update is_favourite (quote)
+    //1. update is_favourite (quote) [always happens in isolation]
     //2. update text (quote)
     //3. update title
     //4. update author(s) - all relative to the "new" title, if any
     //5. update title type
     //6. update tags - replace current with new and get rid of zombies
+
     return bookshelf.transaction(t => {
         let quoteUpdates = {};
         let originalQuote;
-
-        if("is_favourite" in req.body)
-            quoteUpdates.is_favourite = req.body.is_favourite;
         
         if("text" in req.body)
             quoteUpdates.text = req.body.text;
         
         let createTitle;
-        let updateCurrentTitleType = false;
         if("title_id" in req.body) {
             if(req.body.title_id == null || req.body.title_id >= 0) //remove quote from title or assign quote to a different existing title
                 quoteUpdates.title_id = req.body.title_id;
@@ -148,9 +166,6 @@ const updateQuote = (req, res) => {
                     quoteUpdates.title_id = newTitle.get("id");
                 });
             }
-        } else if(req.body.title?.type_id) {
-            //title not changed, but type was
-            updateCurrentTitleType = true;
         }
 
         let createAuthors;
@@ -166,13 +181,7 @@ const updateQuote = (req, res) => {
         let getOriginalQuote = new db.Quote({
             id: req.params.id
         }).fetch()
-        .then(quote => originalQuote = quote.toJSON())
-        .then(() => {
-            if(updateCurrentTitleType)
-                return new db.Title({ id: originalQuote.title_id }).save({
-                    type_id: req.body.title.type_id
-                }, { transacting: t });
-        });
+        .then(quote => originalQuote = quote.toJSON());
 
         let numQuoteAuthors = new db.QuoteAuthor().where({ quote_id: req.params.id }).count().then(num => {
             numQuoteAuthors = num;
@@ -261,25 +270,31 @@ const updateQuote = (req, res) => {
                 }
             }
         }).then(() => {
-            //Is the prev title a zombie title?
-            return checkIfLastQuoteInTitle(originalQuote.title_id)
-            .then(itWasTheLastQuoteInFormerTitle => {
-                if(itWasTheLastQuoteInFormerTitle)
-                    return Title.deleteTitle(originalQuote.title_id, t)
-                else
-                    return Promise.resolve(null);
-            });
+            if(originalQuote.title_id) {
+                //Is the previous title a zombie title?
+                return checkIfLastQuoteInTitle(originalQuote.title_id)
+                .then(itWasTheLastQuoteInFormerTitle => {
+                    if(itWasTheLastQuoteInFormerTitle)
+                        return Title.deleteTitle(originalQuote.title_id, t)
+                    else //maybe it isn't a zombie title, but let's check if the quotes in it now align
+                        return checkIfQuoteAuthorsInTitleAlign(originalQuote.title_id, t)
+                        .then(theyAlign => {
+                            if(theyAlign)
+                                return coalesceQuoteAuthorIntoTitleAuthorAssociation(t, originalQuote.title_id);
+                            else
+                                return Promise.resolve(null);
+                        })
+                });
+            }
+
+            return Promise.resolve(null);
         }).then(() => {
             return Author.cleanUpZombieAuthors(t);
         }).then(() => {
             if("tags" in req.body)
                 return createQuoteTagRelationships(req.params.id, req.body.tags, t, true);
         }).then(() => {
-            new db.Quote({ id: req.params.id }).save(quoteUpdates, { transacting: t })
-            .then(updatedModel => res.send(updatedModel.toJSON()))
-        }).catch(error => {
-            console.log("ERROR", error);
-            res.send(error)
+            return new db.Quote({ id: req.params.id }).save(quoteUpdates, { transacting: t });
         });
     });
 };
@@ -641,8 +656,10 @@ module.exports = {
     deleteQuote,
     processCreateQuoteRequest,
     processDeleteQuoteRequest,
+    processUpdateQuoteRequest,
 
     //for testing
     createQuote,
-    deleteQuote
+    deleteQuote,
+    updateQuote
 };
