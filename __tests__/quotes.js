@@ -1,5 +1,5 @@
 require('dotenv').config({
-    path: 'C:/Users/tme/Documents/Projects/quotepad-server/test.env' //why do i have to write the path in full?
+    path: '/Users/tami.maiwashe/Documents/projects/quotepad-server/test.env' //why do i have to write the path in full?
 });
 
 global.db = require("../db/main.js");
@@ -12,7 +12,8 @@ const getQuote = text => {
         "text": text
     })
     .fetch({ withRelated: [ "authors", "title", "tags" ] })
-    .then(quote => Promise.resolve(quote.toJSON()));
+    .then(quote => Promise.resolve(quote.toJSON()))
+    .catch(err => Promise.resolve(null));
 };
 
 const getTitle = id => {
@@ -21,6 +22,18 @@ const getTitle = id => {
     })
     .fetch({ withRelated: "authors" })
     .then(title => Promise.resolve(title.toJSON()));
+}
+
+const getTagIds = async values => {
+    const getSqls = values.map(val => new db.Tag().where({ value: val }).fetch());
+    
+    return Promise.all(getSqls)
+    .then(tags => {
+        return tags.map(tag => tag.toJSON()).reduce((obj, currTag) => {
+            obj[currTag.value] = currTag.id
+            return obj;
+        }, {});
+    })
 }
 
 const countElems = (elemType, values, field = "value") => {
@@ -55,7 +68,7 @@ const countElems = (elemType, values, field = "value") => {
     //Find a way to initiliase pg with defaults.parseInt8 set to true??
 };
 
-beforeAll(() => {
+const resetDb = () => {
     return knex.raw(`
         DROP TABLE quote_tags;
         DROP TABLE quote_authors;
@@ -122,9 +135,13 @@ beforeAll(() => {
             ('Movie'),
             ('Poem');
     `);
+}
+
+beforeAll(() => {
+    return resetDb();
 })
 
-describe("Creates a quote", () => {
+describe.skip("Creates a quote", () => {
     test("with a new title, new authors and a new tag", () => {
     
         const details = {
@@ -736,7 +753,7 @@ describe("Creates a quote", () => {
     });
 });
 
-describe("Deletes a quote", () => {
+describe.skip("Deletes a quote", () => {
     test("where quote-related associations must be removed, but title, author and tag entities remain because they are still associated with other quotes", async () => {
         await Quote.deleteQuote(1);
 
@@ -986,7 +1003,107 @@ describe("Deletes a quote", () => {
     });
 });
 
-//test update
+describe("Updates a quote", () => {
+    beforeAll(() => resetDb());
+
+    test("by toggling between is_favourite statuses", async () => {
+        const details = {
+            "quote": {
+                "text": "Test Quote 1",
+                "title_id": null
+            },
+            "authors": [],
+            "tags": [
+                { "id": -1, "value": "New Tag 1" },
+                { "id": -1, "value": "New Tag 2" },
+                { "id": -1, "value": "New Tag 3" }
+            ]
+        };
+    
+        await Quote.createQuote(details);
+        let newQuote = await getQuote("Test Quote 1");
+
+        await Quote.updateIsFavourite(newQuote.id, true);
+
+        newQuote = await getQuote("Test Quote 1");
+        expect(newQuote.is_favourite).toBe(true);
+
+        await Quote.updateIsFavourite(newQuote.id, false);
+
+        newQuote = await getQuote("Test Quote 1");
+        expect(newQuote.is_favourite).toBe(false);
+    });
+
+    test("by changing its text", async () => {
+        const details = {
+            "quote": {
+                "text": "Test Quote 2",
+                "title_id": null
+            },
+            "authors": [],
+            "tags": [
+                { "id": -1, "value": "New Tag 4" },
+                { "id": -1, "value": "New Tag 5" },
+            ]
+        };
+
+        await Quote.createQuote(details);
+        let newQuote = await getQuote("Test Quote 2");
+        
+        await Quote.updateQuote(newQuote.id, {
+            "text": "Test Quote 2A"
+        });
+
+        newQuote = await getQuote("Test Quote 2");
+        expect(newQuote).toBeNull();
+
+        newQuote = await getQuote("Test Quote 2A");
+        expect(newQuote).toBeDefined();
+    });
+});
+
+describe("Updates a quote by changing its tags", () => {
+    beforeAll(() => {
+        return Quote.createQuote({
+            "quote": {
+                text: "Test Quote 3",
+                title_id: null
+            },
+            "authors": [],
+            "tags": []
+        });
+    });
+
+    let id = -1;;
+    let tagIds = {};
+
+    test("adding a new tag", async () => {
+        id = (await getQuote("Test Quote 3")).id;
+
+        await Quote.updateQuote(id, {
+            tags: [
+                { "id": -1, "value": "New Tag 6" }
+            ]
+        });
+
+        let updatedQuote = await getQuote("Test Quote 3");
+        expect(updatedQuote.tags).toHaveLength(1);
+    });
+
+    test("adding existing tags", async () => {
+        tagIds = await getTagIds([1, 2, 3, 4, 5, 6].map(num => `New Tag ${num}`));
+
+        await Quote.updateQuote(id, {
+            tags: [1, 3, 5, 6].map(num => ({
+                id: tagIds[`New Tag ${num}`],
+                value: `New Tag ${num}`
+            }))
+        });
+
+        const updatedQuote = await getQuote("Test Quote 3");
+        expect(updatedQuote.tags).toHaveLength(4);
+    });
+});
 
 afterAll(() => {
     return knex.destroy();
