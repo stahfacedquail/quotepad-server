@@ -1103,6 +1103,185 @@ describe("Updates a quote by changing its tags", () => {
         const updatedQuote = await getQuote("Test Quote 3");
         expect(updatedQuote.tags).toHaveLength(4);
     });
+    
+    test("remove some tags, but they do not become zombies", async () => {
+        await Quote.updateQuote(id, {
+            tags: [
+                { id: tagIds["New Tag 1"], value: "New Tag 1" },
+                { id: tagIds["New Tag 6"], value: "New Tag 6" }
+            ]
+        });
+
+        const updatedQuote = await getQuote("Test Quote 3");
+        expect(updatedQuote.tags).toHaveLength(2);
+
+        const numOtherTags = await countElems("Tag", [ "New Tag 3", "New Tag 5" ]);
+        expect(numOtherTags).toBe(2);
+    });
+
+    test("remove all the tags, and one of them becomes a zombie", async () => {
+        await Quote.updateQuote(id, {
+            tags: []
+        });
+
+        const updatedQuote = await getQuote("Test Quote 3");
+        expect(updatedQuote.tags).toHaveLength(0);
+
+        const numLivingTags = await countElems("Tag", [ 1, 3, 5 ].map(num => `New Tag ${num}`));
+        expect(numLivingTags).toBe(3);
+
+        const numZombieTags = await countElems("Tag", "New Tag 6");
+        expect(numZombieTags).toBe(0);
+    });
+
+    test("add a mix of new and existing tags", async () => {
+        await Quote.updateQuote(id, {
+            tags: [ 7, 8, 9 ].map(num => ({
+                id: -1,
+                value: `New Tag ${num}`
+            })).concat({
+                id: tagIds["New Tag 5"],
+                value: "New Tag 5"
+            })
+        });
+
+        const updatedQuote = await getQuote("Test Quote 3");
+        expect(updatedQuote.tags).toHaveLength(4);
+    });
+
+    test("replace all the tags with completely new tags, and create zombie tags in the process", async () => {
+        await Quote.updateQuote(id, {
+            tags: [ 10, 11, 12, 13 ].map(num => ({
+                id: -1,
+                value: `New Tag ${num}`
+            }))
+        });
+
+        const updatedQuote = await getQuote("Test Quote 3");
+        expect(updatedQuote.tags).toHaveLength(4);
+
+        const numLivingTags = await countElems("Tag", "New Tag 5");
+        expect(numLivingTags).toBe(1);
+
+        const numZombieTags = await countElems("Tag", [ 7, 8, 9 ].map(num => `New Tag ${num}`));
+        expect(numZombieTags).toBe(0);
+    });
+
+    test("replace some of the tags with a new tag, creating zombie tags in the process", async () => {
+        tagIds = {
+            ...tagIds,
+            ...(await getTagIds([ "New Tag 12", "New Tag 13" ]))
+        };
+
+        await Quote.updateQuote(id, {
+            tags: [
+                { id: -1, value: "New Tag 14" },
+                { id: tagIds["New Tag 12"], value: "New Tag 12" },
+                { id: tagIds["New Tag 13"], value: "New Tag 13" },
+            ]
+        });
+
+        const updatedQuote = await getQuote("Test Quote 3");
+        expect(updatedQuote.tags).toHaveLength(3);
+
+        const numZombieTags = await countElems("Tag", [ "New Tag 10", "New Tag 11" ]);
+        expect(numZombieTags).toBe(0);
+    });
+
+    test("replace some of the tags with existing tags, creating zombie tags in the process", async () => {
+        tagIds = {
+            ...tagIds,
+            ...(await getTagIds([ "New Tag 14" ]))
+        };
+
+        await Quote.updateQuote(id, {
+            tags: [ 3, 4, 12, 14 ].map(num => ({
+                id: tagIds[`New Tag ${num}`],
+                value: `New Tag ${num}`
+            }))
+        });
+
+        const updatedQuote = await getQuote("Test Quote 3");
+        expect(updatedQuote.tags).toHaveLength(4);
+
+        const numZombieTags = await countElems("Tag", "New Tag 13");
+        expect(numZombieTags).toBe(0);
+    });
+
+    test("replace all the tags with an existing tag, creating some zombie tags in the process", async () => {
+        await Quote.updateQuote(id, {
+            tags: [{
+                id: tagIds["New Tag 1"], value: "New Tag 1"
+            }] 
+        });
+
+        const updatedQuote = await getQuote("Test Quote 3");
+        expect(updatedQuote.tags).toHaveLength(1);
+
+        const numLivingTags = await countElems("Tag", [ "New Tag 3", "New Tag 4" ]);
+        expect(numLivingTags).toBe(2);
+
+        const numZombieTags = await countElems("Tag", [ "New Tag 12", "New Tag 14" ]);
+        expect(numZombieTags).toBe(0);
+    });
+
+    test("replace all the tags with a mix of new and existing tags, without creating any zombie tags", async () => {
+        await Quote.updateQuote(id, {
+            tags: [
+                { id: tagIds["New Tag 2"], value: "New Tag 2" },
+                { id: tagIds["New Tag 5"], value: "New Tag 5" },
+                { id: -1, value: "New Tag 15" }
+            ] 
+        });
+
+        const updatedQuote = await getQuote("Test Quote 3");
+        expect(updatedQuote.tags).toHaveLength(3);
+
+        const numLivingTags = await countElems("Tag", "New Tag 1");
+        expect(numLivingTags).toBe(1);
+    });
+
+    test("replace some of the tags with a mix of new and existing tags, without creating any zombie tags", async () => {
+        tagIds = {
+            ...tagIds,
+            ...(await getTagIds([ "New Tag 15" ]))
+        };
+
+        await Quote.updateQuote(id, {
+            tags: [ 16, 17, 18 ].map(num => ({
+                id: -1, value: `New Tag ${num}`
+            })).concat([4, 15].map(num => ({
+                id: tagIds[`New Tag ${num}`],
+                value: tagIds[`New Tag ${num}`]
+            })))
+        });
+
+        const updatedQuote = await getQuote("Test Quote 3");
+        expect(updatedQuote.tags).toHaveLength(5);
+
+        const numLivingTags = await countElems("Tag", [ "New Tag 2", "New Tag 5" ]);
+        expect(numLivingTags).toBe(2);
+    });
+
+    test("remove all tags again", async () => {
+        tagIds = {
+            ...tagIds,
+            ...(await getTagIds([ 16, 17, 18 ].map(num => `New Tag ${num}`)))
+        };
+
+        await Quote.updateQuote(id, {
+            tags: []
+        });
+
+        const updatedQuote = await getQuote("Test Quote 3");
+        expect(updatedQuote.tags).toHaveLength(0);
+
+        const numLivingTags = await countElems("Tag", [ "New Tag 4" ]);
+        expect(numLivingTags).toBe(1);
+
+        const numZombieTags = await countElems("Tag", [ 15, 16, 17, 18 ].map(num => `New Tag ${num}`));
+        expect(numZombieTags).toBe(0);
+    });
 });
 
 afterAll(() => {

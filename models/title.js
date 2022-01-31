@@ -1,3 +1,5 @@
+const utils = require("../db/util.js");
+
 const findTitleById = (req, res) => {
     if(req.query) {
         if(req.query.full) {
@@ -35,9 +37,11 @@ const createTitle = (props, transaction) => {
 };
 
 const deleteTitle = (titleId, transaction) => {
-    return new db.TitleAuthor()
-        .where({ title_id: titleId })
-    .destroy({ transacting: transaction, require: false })
+    return utils.deleteMultiple(
+        new db.TitleAuthors().where({ title_id: titleId }),
+        db.TitleAuthor,
+        transaction
+    )
     .then(() => {
         //console.log("Title-author relationships deleted; next - delete title");
         return new db.Title()

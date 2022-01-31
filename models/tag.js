@@ -16,7 +16,6 @@ const cleanUpZombieTags = trx => {
         "WHERE id NOT IN ( SELECT tag_id FROM quote_tags );"
     ).then(quotelessTags => {
         quotelessTags = quotelessTags.rows;
-        //console.log("Delete these quoteless tags", quotelessTags)
 
         if(quotelessTags.length == 0)
             return Promise.resolve(null);
