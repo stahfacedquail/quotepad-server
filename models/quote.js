@@ -157,6 +157,7 @@ const updateQuote = (quoteId, qtUpdates) => {
                     value: qtUpdates.title.value,
                     type_id: qtUpdates.title.type_id
                 }, t).then(newTitle => {
+                    qtUpdates.title_id = newTitle.get("id");
                     quoteUpdates.title_id = newTitle.get("id");
                 });
             }
@@ -170,6 +171,8 @@ const updateQuote = (quoteId, qtUpdates) => {
                     newAuthors = authors.map(author => author.toJSON());
                     qtUpdates.authors = qtUpdates.authors.filter(author => author.id >= 0).concat(newAuthors).map(author => author.id);
                 });
+            else
+                qtUpdates.authors = qtUpdates.authors.map(author => author.id);
         }
 
         let getOriginalQuote = new db.Quote({
@@ -230,7 +233,7 @@ const updateQuote = (quoteId, qtUpdates) => {
                     
                     let removeOldQuoteAuthorAssociations = Promise.resolve(null);
                     if(numQuoteAuthors > 0)
-                        removeOldQuoteAuthorAssociations = util.deleteMultiple(
+                        removeOldQuoteAuthorAssociations = utils.deleteMultiple(
                             new db.QuoteAuthors().where({ quote_id: quoteId }),
                             db.QuoteAuthor,
                             t
@@ -238,12 +241,12 @@ const updateQuote = (quoteId, qtUpdates) => {
                     
                     return removeOldQuoteAuthorAssociations.then(() => {
                         if(createTitle) //if this quote now belongs to a newly-created title, create title/author associations
-                            return qtUpdates.authors.map(author => {
+                            return Promise.all(qtUpdates.authors.map(author =>
                                 new db.TitleAuthor().save({
                                     title_id: qtUpdates.title_id,
-                                    author_id: author.id
-                                }, { transacting: t });
-                            });
+                                    author_id: author
+                                }, { transacting: t })
+                            ));
                         else //otherwise, look and see if incoming authors match the new title's authors, then create quote/author associations if need be
                             return createQuoteBelongingRelationship(quoteId, qtUpdates.title_id, qtUpdates.authors, t);
                     });
@@ -267,12 +270,14 @@ const updateQuote = (quoteId, qtUpdates) => {
                         return createQuoteBelongingRelationship(quoteId, originalQuote.title_id, qtUpdates.authors, t)
                     })
                     .then(() => {
-                        //Maybe in updating the authors, all the quotes in this title now have the same authors?
-                        return checkIfQuoteAuthorsInTitleAlign(qtUpdates.title_id, t);
+                        if(! createTitle) {
+                            //Maybe in updating the authors, all the quotes in this title now have the same authors?
+                            return checkIfQuoteAuthorsInTitleAlign(qtUpdates.title_id, t);
+                        }
                     })
                     .then(theyAlign => {
                         if(theyAlign)
-                            return coalesceQuoteAuthorIntoTitleAuthorAssociation(t, qtUpdates.title_id, qtUpdates.authors.map(author => author.id));
+                            return coalesceQuoteAuthorIntoTitleAuthorAssociation(t, qtUpdates.title_id, qtUpdates.authors);
         
                         //else: the quotes have different authors to each other;
                         //keep the relationships as quote/author relationships

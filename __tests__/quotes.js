@@ -24,16 +24,16 @@ const getTitle = id => {
     .then(title => Promise.resolve(title.toJSON()));
 }
 
-const getTagIds = async values => {
-    const getSqls = values.map(val => new db.Tag().where({ value: val }).fetch());
+const getElemIds = async (ElemClass, values) => {
+    const getSqls = values.map(val => new ElemClass().where({ value: val }).fetch());
     
     return Promise.all(getSqls)
-    .then(tags => {
-        return tags.map(tag => tag.toJSON()).reduce((obj, currTag) => {
-            obj[currTag.value] = currTag.id
+    .then(elems => {
+        return elems.map(elem => elem.toJSON()).reduce((obj, currElem) => {
+            obj[currElem.value] = currElem.id
             return obj;
         }, {});
-    })
+    });
 }
 
 const countElems = (elemType, values, field = "value") => {
@@ -141,7 +141,7 @@ beforeAll(() => {
     return resetDb();
 })
 
-describe.skip("Creates a quote", () => {
+describe("Creates a quote", () => {
     test("with a new title, new authors and a new tag", () => {
     
         const details = {
@@ -753,7 +753,7 @@ describe.skip("Creates a quote", () => {
     });
 });
 
-describe.skip("Deletes a quote", () => {
+describe("Deletes a quote", () => {
     test("where quote-related associations must be removed, but title, author and tag entities remain because they are still associated with other quotes", async () => {
         await Quote.deleteQuote(1);
 
@@ -1060,227 +1060,882 @@ describe("Updates a quote", () => {
         newQuote = await getQuote("Test Quote 2A");
         expect(newQuote).toBeDefined();
     });
+
+    describe("by changing its tags", () => {
+        beforeAll(() => {
+            return Quote.createQuote({
+                "quote": {
+                    text: "Test Quote 3",
+                    title_id: null
+                },
+                "authors": [],
+                "tags": []
+            });
+        });
+    
+        let id = -1;;
+        let tagIds = {};
+    
+        test("adding a new tag", async () => {
+            id = (await getQuote("Test Quote 3")).id;
+    
+            await Quote.updateQuote(id, {
+                tags: [
+                    { "id": -1, "value": "New Tag 6" }
+                ]
+            });
+    
+            let updatedQuote = await getQuote("Test Quote 3");
+            expect(updatedQuote.tags).toHaveLength(1);
+        });
+    
+        test("adding existing tags", async () => {
+            tagIds = await getElemIds(db.Tag, [1, 2, 3, 4, 5, 6].map(num => `New Tag ${num}`));
+    
+            await Quote.updateQuote(id, {
+                tags: [1, 3, 5, 6].map(num => ({
+                    id: tagIds[`New Tag ${num}`],
+                    value: `New Tag ${num}`
+                }))
+            });
+    
+            const updatedQuote = await getQuote("Test Quote 3");
+            expect(updatedQuote.tags).toHaveLength(4);
+        });
+        
+        test("remove some tags, but they do not become zombies", async () => {
+            await Quote.updateQuote(id, {
+                tags: [
+                    { id: tagIds["New Tag 1"], value: "New Tag 1" },
+                    { id: tagIds["New Tag 6"], value: "New Tag 6" }
+                ]
+            });
+    
+            const updatedQuote = await getQuote("Test Quote 3");
+            expect(updatedQuote.tags).toHaveLength(2);
+    
+            const numOtherTags = await countElems("Tag", [ "New Tag 3", "New Tag 5" ]);
+            expect(numOtherTags).toBe(2);
+        });
+    
+        test("remove all the tags, and one of them becomes a zombie", async () => {
+            await Quote.updateQuote(id, {
+                tags: []
+            });
+    
+            const updatedQuote = await getQuote("Test Quote 3");
+            expect(updatedQuote.tags).toHaveLength(0);
+    
+            const numLivingTags = await countElems("Tag", [ 1, 3, 5 ].map(num => `New Tag ${num}`));
+            expect(numLivingTags).toBe(3);
+    
+            const numZombieTags = await countElems("Tag", "New Tag 6");
+            expect(numZombieTags).toBe(0);
+        });
+    
+        test("add a mix of new and existing tags", async () => {
+            await Quote.updateQuote(id, {
+                tags: [ 7, 8, 9 ].map(num => ({
+                    id: -1,
+                    value: `New Tag ${num}`
+                })).concat({
+                    id: tagIds["New Tag 5"],
+                    value: "New Tag 5"
+                })
+            });
+    
+            const updatedQuote = await getQuote("Test Quote 3");
+            expect(updatedQuote.tags).toHaveLength(4);
+        });
+    
+        test("replace all the tags with completely new tags, and create zombie tags in the process", async () => {
+            await Quote.updateQuote(id, {
+                tags: [ 10, 11, 12, 13 ].map(num => ({
+                    id: -1,
+                    value: `New Tag ${num}`
+                }))
+            });
+    
+            const updatedQuote = await getQuote("Test Quote 3");
+            expect(updatedQuote.tags).toHaveLength(4);
+    
+            const numLivingTags = await countElems("Tag", "New Tag 5");
+            expect(numLivingTags).toBe(1);
+    
+            const numZombieTags = await countElems("Tag", [ 7, 8, 9 ].map(num => `New Tag ${num}`));
+            expect(numZombieTags).toBe(0);
+        });
+    
+        test("replace some of the tags with a new tag, creating zombie tags in the process", async () => {
+            tagIds = {
+                ...tagIds,
+                ...(await getElemIds(db.Tag, [ "New Tag 12", "New Tag 13" ]))
+            };
+    
+            await Quote.updateQuote(id, {
+                tags: [
+                    { id: -1, value: "New Tag 14" },
+                    { id: tagIds["New Tag 12"], value: "New Tag 12" },
+                    { id: tagIds["New Tag 13"], value: "New Tag 13" },
+                ]
+            });
+    
+            const updatedQuote = await getQuote("Test Quote 3");
+            expect(updatedQuote.tags).toHaveLength(3);
+    
+            const numZombieTags = await countElems("Tag", [ "New Tag 10", "New Tag 11" ]);
+            expect(numZombieTags).toBe(0);
+        });
+    
+        test("replace some of the tags with existing tags, creating zombie tags in the process", async () => {
+            tagIds = {
+                ...tagIds,
+                ...(await getElemIds(db.Tag, [ "New Tag 14" ]))
+            };
+    
+            await Quote.updateQuote(id, {
+                tags: [ 3, 4, 12, 14 ].map(num => ({
+                    id: tagIds[`New Tag ${num}`],
+                    value: `New Tag ${num}`
+                }))
+            });
+    
+            const updatedQuote = await getQuote("Test Quote 3");
+            expect(updatedQuote.tags).toHaveLength(4);
+    
+            const numZombieTags = await countElems("Tag", "New Tag 13");
+            expect(numZombieTags).toBe(0);
+        });
+    
+        test("replace all the tags with an existing tag, creating some zombie tags in the process", async () => {
+            await Quote.updateQuote(id, {
+                tags: [{
+                    id: tagIds["New Tag 1"], value: "New Tag 1"
+                }] 
+            });
+    
+            const updatedQuote = await getQuote("Test Quote 3");
+            expect(updatedQuote.tags).toHaveLength(1);
+    
+            const numLivingTags = await countElems("Tag", [ "New Tag 3", "New Tag 4" ]);
+            expect(numLivingTags).toBe(2);
+    
+            const numZombieTags = await countElems("Tag", [ "New Tag 12", "New Tag 14" ]);
+            expect(numZombieTags).toBe(0);
+        });
+    
+        test("replace all the tags with a mix of new and existing tags, without creating any zombie tags", async () => {
+            await Quote.updateQuote(id, {
+                tags: [
+                    { id: tagIds["New Tag 2"], value: "New Tag 2" },
+                    { id: tagIds["New Tag 5"], value: "New Tag 5" },
+                    { id: -1, value: "New Tag 15" }
+                ] 
+            });
+    
+            const updatedQuote = await getQuote("Test Quote 3");
+            expect(updatedQuote.tags).toHaveLength(3);
+    
+            const numLivingTags = await countElems("Tag", "New Tag 1");
+            expect(numLivingTags).toBe(1);
+        });
+    
+        test("replace some of the tags with a mix of new and existing tags, without creating any zombie tags", async () => {
+            tagIds = {
+                ...tagIds,
+                ...(await getElemIds(db.Tag, [ "New Tag 15" ]))
+            };
+    
+            await Quote.updateQuote(id, {
+                tags: [ 16, 17, 18 ].map(num => ({
+                    id: -1, value: `New Tag ${num}`
+                })).concat([4, 15].map(num => ({
+                    id: tagIds[`New Tag ${num}`],
+                    value: tagIds[`New Tag ${num}`]
+                })))
+            });
+    
+            const updatedQuote = await getQuote("Test Quote 3");
+            expect(updatedQuote.tags).toHaveLength(5);
+    
+            const numLivingTags = await countElems("Tag", [ "New Tag 2", "New Tag 5" ]);
+            expect(numLivingTags).toBe(2);
+        });
+    
+        test("remove all tags again", async () => {
+            tagIds = {
+                ...tagIds,
+                ...(await getElemIds(db.Tag, [ 16, 17, 18 ].map(num => `New Tag ${num}`)))
+            };
+    
+            await Quote.updateQuote(id, {
+                tags: []
+            });
+    
+            const updatedQuote = await getQuote("Test Quote 3");
+            expect(updatedQuote.tags).toHaveLength(0);
+    
+            const numLivingTags = await countElems("Tag", [ "New Tag 4" ]);
+            expect(numLivingTags).toBe(1);
+    
+            const numZombieTags = await countElems("Tag", [ 15, 16, 17, 18 ].map(num => `New Tag ${num}`));
+            expect(numZombieTags).toBe(0);
+        });
+    });
 });
 
-describe("Updates a quote by changing its tags", () => {
-    beforeAll(() => {
-        return Quote.createQuote({
-            "quote": {
-                text: "Test Quote 3",
-                title_id: null
-            },
-            "authors": [],
-            "tags": []
-        });
-    });
+describe.only("Updates a quote by changing its title and/or authors", () => {
+    beforeAll(() => resetDb());
 
-    let id = -1;;
-    let tagIds = {};
+    let authorIds = {};
 
-    test("adding a new tag", async () => {
-        id = (await getQuote("Test Quote 3")).id;
+    describe("where the title changes from null to something new", () => {
+        test("and the authors are updated from nothing to all-new authors", async () => {
+            const details = {
+                quote: {
+                    text: "Test Quote 1",
+                    title_id: null
+                },
+                authors: [],
+                tags: []
+            };
 
-        await Quote.updateQuote(id, {
-            tags: [
-                { "id": -1, "value": "New Tag 6" }
-            ]
-        });
+            await Quote.createQuote(details);
 
-        let updatedQuote = await getQuote("Test Quote 3");
-        expect(updatedQuote.tags).toHaveLength(1);
-    });
+            let quote = await getQuote("Test Quote 1");
 
-    test("adding existing tags", async () => {
-        tagIds = await getTagIds([1, 2, 3, 4, 5, 6].map(num => `New Tag ${num}`));
+            await Quote.updateQuote(quote.id, {
+                title_id: -1,
+                title: {
+                    value: "New Title 1",
+                    type_id: 1
+                },
+                authors: [1, 2, 3].map(num => ({
+                    id: -1, value: `New Author ${num}`
+                }))
+            });
 
-        await Quote.updateQuote(id, {
-            tags: [1, 3, 5, 6].map(num => ({
-                id: tagIds[`New Tag ${num}`],
-                value: `New Tag ${num}`
-            }))
-        });
+            authorIds = {
+                ...(await getElemIds(db.Author, [1, 2, 3].map(n => `New Author ${n}`)))
+            };
 
-        const updatedQuote = await getQuote("Test Quote 3");
-        expect(updatedQuote.tags).toHaveLength(4);
-    });
-    
-    test("remove some tags, but they do not become zombies", async () => {
-        await Quote.updateQuote(id, {
-            tags: [
-                { id: tagIds["New Tag 1"], value: "New Tag 1" },
-                { id: tagIds["New Tag 6"], value: "New Tag 6" }
-            ]
+            quote = await getQuote("Test Quote 1");
+
+            expect(quote.title_id).not.toBeNull();
+
+            const newTitle = await getTitle(quote.title_id);
+            expect(newTitle.value).toBe("New Title 1");
+            expect(newTitle.type_id).toBe(1);
+            expect(newTitle.authors).toHaveLength(3);
+
+            expect(quote.authors).toHaveLength(0);
         });
 
-        const updatedQuote = await getQuote("Test Quote 3");
-        expect(updatedQuote.tags).toHaveLength(2);
+        test("and the authors are added to by new authors", async () => {
+            const quoteTxt = "Test Quote 2";
+            const newTitleTxt = "New Title 2";
 
-        const numOtherTags = await countElems("Tag", [ "New Tag 3", "New Tag 5" ]);
-        expect(numOtherTags).toBe(2);
-    });
+            const details = {
+                quote: {
+                    text: quoteTxt,
+                    title_id: null
+                },
+                authors: [
+                    { id: authorIds["New Author 2"], value: "New Author 2" },
+                    { id: -1, value: "New Author 4" }
+                ],
+                tags: []
+            };
 
-    test("remove all the tags, and one of them becomes a zombie", async () => {
-        await Quote.updateQuote(id, {
-            tags: []
+            await Quote.createQuote(details);
+
+            authorIds = {
+                ...authorIds,
+                ...(await getElemIds(db.Author, [ "New Author 4" ]))
+            };
+
+            let quote = await getQuote(quoteTxt);
+
+            await Quote.updateQuote(quote.id, {
+                title_id: -1,
+                title: {
+                    value: newTitleTxt
+                },
+                authors: [
+                    { id: authorIds["New Author 2"], value: "New Author 2" },
+                    { id: authorIds["New Author 4"], value: "New Author 4" },
+                    { id: -1, value: "New Author 5" },
+                    { id: -1, value: "New Author 6" }
+                ]
+            });
+
+            authorIds = {
+                ...authorIds,
+                ...(await getElemIds(db.Author, [ "New Author 5", "New Author 6" ]))
+            };
+
+            quote = await getQuote(quoteTxt);
+
+            const newTitle = await getTitle(quote.title_id);
+            expect(newTitle.value).toBe(newTitleTxt);
+            expect(newTitle.type_id).toBeNull();
+            expect(newTitle.authors).toHaveLength(4);
+
+            expect(quote.authors).toHaveLength(0);
         });
 
-        const updatedQuote = await getQuote("Test Quote 3");
-        expect(updatedQuote.tags).toHaveLength(0);
+        test("and the authors go from zero to one existing author", async () => {
+            const quoteTxt = "Test Quote 3";
+            const newTitleTxt = "New Title 3";
 
-        const numLivingTags = await countElems("Tag", [ 1, 3, 5 ].map(num => `New Tag ${num}`));
-        expect(numLivingTags).toBe(3);
+            const details = {
+                quote: {
+                    text: quoteTxt,
+                    title_id: null
+                },
+                authors: [],
+                tags: []
+            };
 
-        const numZombieTags = await countElems("Tag", "New Tag 6");
-        expect(numZombieTags).toBe(0);
-    });
+            await Quote.createQuote(details);
 
-    test("add a mix of new and existing tags", async () => {
-        await Quote.updateQuote(id, {
-            tags: [ 7, 8, 9 ].map(num => ({
-                id: -1,
-                value: `New Tag ${num}`
-            })).concat({
-                id: tagIds["New Tag 5"],
-                value: "New Tag 5"
-            })
+            let quote = await getQuote(quoteTxt);
+
+            await Quote.updateQuote(quote.id, {
+                title_id: -1,
+                title: {
+                    value: newTitleTxt,
+                    type_id: 6
+                },
+                authors: [
+                    { id: authorIds["New Author 3"], value: "New Author 3" }
+                ]
+            });
+
+            quote = await getQuote(quoteTxt);
+
+            const newTitle = await getTitle(quote.title_id);
+            expect(newTitle.value).toBe(newTitleTxt);
+            expect(newTitle.type_id).toBe(6);
+            expect(newTitle.authors).toHaveLength(1);
+
+            expect(quote.authors).toHaveLength(0);
         });
 
-        const updatedQuote = await getQuote("Test Quote 3");
-        expect(updatedQuote.tags).toHaveLength(4);
-    });
+        test("and the authors are updated to include another existing author", async () => {
+            const quoteTxt = "Test Quote 4";
+            const newTitleTxt = "New Title 4";
 
-    test("replace all the tags with completely new tags, and create zombie tags in the process", async () => {
-        await Quote.updateQuote(id, {
-            tags: [ 10, 11, 12, 13 ].map(num => ({
-                id: -1,
-                value: `New Tag ${num}`
-            }))
+            const details = {
+                quote: {
+                    text: quoteTxt,
+                    title_id: null
+                },
+                authors: [
+                    { id: authorIds["New Author 1"], value: "New Author 1" },
+                    { id: authorIds["New Author 3"], value: "New Author 3" },
+                    { id: authorIds["New Author 6"], value: "New Author 6" },
+                ],
+                tags: []
+            };
+
+            await Quote.createQuote(details);
+
+            let quote = await getQuote(quoteTxt);
+
+            await Quote.updateQuote(quote.id, {
+                title_id: -1,
+                title: {
+                    value: newTitleTxt
+                },
+                authors: [
+                    { id: authorIds["New Author 1"], value: "New Author 1" },
+                    { id: authorIds["New Author 3"], value: "New Author 3" },
+                    { id: authorIds["New Author 6"], value: "New Author 6" },
+                    { id: authorIds["New Author 2"], value: "New Author 2" }
+                ]
+            });
+
+            quote = await getQuote(quoteTxt);
+
+            const newTitle = await getTitle(quote.title_id);
+            expect(newTitle.value).toBe(newTitleTxt);
+            expect(newTitle.type_id).toBeNull();
+            expect(newTitle.authors).toHaveLength(4);
+
+            expect(quote.authors).toHaveLength(0);
         });
 
-        const updatedQuote = await getQuote("Test Quote 3");
-        expect(updatedQuote.tags).toHaveLength(4);
+        test("and the authors are updated from nothing to a mix of existing and new authors", async () => {
+            const quoteTxt = "Test Quote 5";
+            const newTitleTxt = "New Title 5";
 
-        const numLivingTags = await countElems("Tag", "New Tag 5");
-        expect(numLivingTags).toBe(1);
+            const details = {
+                quote: {
+                    text: quoteTxt,
+                    title_id: null
+                },
+                authors: [],
+                tags: []
+            };
 
-        const numZombieTags = await countElems("Tag", [ 7, 8, 9 ].map(num => `New Tag ${num}`));
-        expect(numZombieTags).toBe(0);
-    });
+            await Quote.createQuote(details);
 
-    test("replace some of the tags with a new tag, creating zombie tags in the process", async () => {
-        tagIds = {
-            ...tagIds,
-            ...(await getTagIds([ "New Tag 12", "New Tag 13" ]))
-        };
+            let quote = await getQuote(quoteTxt);
 
-        await Quote.updateQuote(id, {
-            tags: [
-                { id: -1, value: "New Tag 14" },
-                { id: tagIds["New Tag 12"], value: "New Tag 12" },
-                { id: tagIds["New Tag 13"], value: "New Tag 13" },
-            ]
+            await Quote.updateQuote(quote.id, {
+                title_id: -1,
+                title: {
+                    value: newTitleTxt
+                },
+                authors: [
+                    { id: authorIds["New Author 3"], value: "New Author 3" },
+                    { id: authorIds["New Author 4"], value: "New Author 4" },
+                    { id: -1, value: "New Author 7" }
+                ]
+            });
+
+            authorIds = {
+                ...authorIds,
+                ...(await getElemIds(db.Author, [ "New Author 7"]))
+            };
+
+            quote = await getQuote(quoteTxt);
+
+            const newTitle = await getTitle(quote.title_id);
+            expect(newTitle.value).toBe(newTitleTxt);
+            expect(newTitle.type_id).toBeNull();
+            expect(newTitle.authors).toHaveLength(3);
+
+            expect(quote.authors).toHaveLength(0);
         });
 
-        const updatedQuote = await getQuote("Test Quote 3");
-        expect(updatedQuote.tags).toHaveLength(3);
+        test("and the authors are updated with a mix of new and existing authors", async () => {
+            const quoteTxt = "Test Quote 6";
+            const newTitleTxt = "New Title 6";
 
-        const numZombieTags = await countElems("Tag", [ "New Tag 10", "New Tag 11" ]);
-        expect(numZombieTags).toBe(0);
-    });
+            const details = {
+                quote: {
+                    text: quoteTxt,
+                    title_id: null
+                },
+                authors: [
+                    { id: authorIds["New Author 5"], value: "New Author 5" },
+                    { id: authorIds["New Author 7"], value: "New Author 7" },
+                    { id: -1, value: "New Author 8" }
+                ],
+                tags: []
+            };
 
-    test("replace some of the tags with existing tags, creating zombie tags in the process", async () => {
-        tagIds = {
-            ...tagIds,
-            ...(await getTagIds([ "New Tag 14" ]))
-        };
+            await Quote.createQuote(details);
 
-        await Quote.updateQuote(id, {
-            tags: [ 3, 4, 12, 14 ].map(num => ({
-                id: tagIds[`New Tag ${num}`],
-                value: `New Tag ${num}`
-            }))
+            authorIds = {
+                ...authorIds,
+                ...(await getElemIds(db.Author, [ "New Author 8" ]))
+            };
+
+            let quote = await getQuote(quoteTxt);
+
+            await Quote.updateQuote(quote.id, {
+                title_id: -1,
+                title: {
+                    value: newTitleTxt,
+                    type_id: 2
+                },
+                authors: [
+                    { id: authorIds["New Author 3"], value: "New Author 3" },
+                    { id: authorIds["New Author 7"], value: "New Author 7" },
+                    { id: authorIds["New Author 5"], value: "New Author 5" },
+                    { id: authorIds["New Author 8"], value: "New Author 8" },
+                    { id: -1, value: "New Author 9" },
+                    { id: -1, value: "New Author 10" },
+                    { id: -1, value: "New Author 11" },
+                ]
+            });
+
+            authorIds = {
+                ...authorIds,
+                ...(await getElemIds(db.Author, [ "New Author 9", "New Author 10", "New Author 11" ]))
+            };
+
+            quote = await getQuote(quoteTxt);
+
+            const newTitle = await getTitle(quote.title_id);
+            expect(newTitle.value).toBe(newTitleTxt);
+            expect(newTitle.type_id).toBe(2);
+            expect(newTitle.authors).toHaveLength(7);
+
+            expect(quote.authors).toHaveLength(0);
         });
 
-        const updatedQuote = await getQuote("Test Quote 3");
-        expect(updatedQuote.tags).toHaveLength(4);
+        test("and the authors are all removed", async () => {
+            const quoteTxt = "Test Quote 7";
+            const newTitleTxt = "New Title 7";
 
-        const numZombieTags = await countElems("Tag", "New Tag 13");
-        expect(numZombieTags).toBe(0);
-    });
+            const details = {
+                quote: {
+                    text: quoteTxt,
+                    title_id: null
+                },
+                authors: [
+                    { id: authorIds["New Author 5"], value: "New Author 5" },
+                    { id: authorIds["New Author 8"], value: "New Author 8" }
+                ],
+                tags: []
+            };
 
-    test("replace all the tags with an existing tag, creating some zombie tags in the process", async () => {
-        await Quote.updateQuote(id, {
-            tags: [{
-                id: tagIds["New Tag 1"], value: "New Tag 1"
-            }] 
+            await Quote.createQuote(details);
+
+            let quote = await getQuote(quoteTxt);
+
+            await Quote.updateQuote(quote.id, {
+                title_id: -1,
+                title: {
+                    value: newTitleTxt
+                },
+                authors: []
+            });
+
+            quote = await getQuote(quoteTxt);
+
+            const newTitle = await getTitle(quote.title_id);
+            expect(newTitle.value).toBe(newTitleTxt);
+            expect(newTitle.type_id).toBeNull();
+            expect(newTitle.authors).toHaveLength(0);
+
+            expect(quote.authors).toHaveLength(0);
         });
 
-        const updatedQuote = await getQuote("Test Quote 3");
-        expect(updatedQuote.tags).toHaveLength(1);
+        test("and the authors remain at zero", async () => {
+            const quoteTxt = "Test Quote 8";
+            const newTitleTxt = "New Title 8";
 
-        const numLivingTags = await countElems("Tag", [ "New Tag 3", "New Tag 4" ]);
-        expect(numLivingTags).toBe(2);
+            const details = {
+                quote: {
+                    text: quoteTxt,
+                    title_id: null
+                },
+                authors: [],
+                tags: []
+            };
 
-        const numZombieTags = await countElems("Tag", [ "New Tag 12", "New Tag 14" ]);
-        expect(numZombieTags).toBe(0);
-    });
+            await Quote.createQuote(details);
 
-    test("replace all the tags with a mix of new and existing tags, without creating any zombie tags", async () => {
-        await Quote.updateQuote(id, {
-            tags: [
-                { id: tagIds["New Tag 2"], value: "New Tag 2" },
-                { id: tagIds["New Tag 5"], value: "New Tag 5" },
-                { id: -1, value: "New Tag 15" }
-            ] 
+            let quote = await getQuote(quoteTxt);
+
+            await Quote.updateQuote(quote.id, {
+                title_id: -1,
+                title: {
+                    value: newTitleTxt
+                },
+                authors: []
+            });
+
+            quote = await getQuote(quoteTxt);
+
+            const newTitle = await getTitle(quote.title_id);
+            expect(newTitle.value).toBe(newTitleTxt);
+            expect(newTitle.type_id).toBeNull();
+            expect(newTitle.authors).toHaveLength(0);
+
+            expect(quote.authors).toHaveLength(0);
         });
 
-        const updatedQuote = await getQuote("Test Quote 3");
-        expect(updatedQuote.tags).toHaveLength(3);
+        test("and the authors remain the same", async () => {
+            const quoteTxt = "Test Quote 9";
+            const newTitleTxt = "New Title 9";
 
-        const numLivingTags = await countElems("Tag", "New Tag 1");
-        expect(numLivingTags).toBe(1);
-    });
+            const details = {
+                quote: {
+                    text: quoteTxt,
+                    title_id: null
+                },
+                authors: [1, 4, 5, 10].map(n => ({
+                    id: authorIds[`New Author ${n}`], value: `New Author ${n}`
+                })),
+                tags: []
+            };
 
-    test("replace some of the tags with a mix of new and existing tags, without creating any zombie tags", async () => {
-        tagIds = {
-            ...tagIds,
-            ...(await getTagIds([ "New Tag 15" ]))
-        };
+            await Quote.createQuote(details);
 
-        await Quote.updateQuote(id, {
-            tags: [ 16, 17, 18 ].map(num => ({
-                id: -1, value: `New Tag ${num}`
-            })).concat([4, 15].map(num => ({
-                id: tagIds[`New Tag ${num}`],
-                value: tagIds[`New Tag ${num}`]
-            })))
+            let quote = await getQuote(quoteTxt);
+
+            await Quote.updateQuote(quote.id, {
+                title_id: -1,
+                title: {
+                    value: newTitleTxt,
+                    type_id: 3
+                },
+                authors: [1, 4, 5, 10].map(n => ({
+                    id: authorIds[`New Author ${n}`], value: `New Author ${n}`
+                }))
+            });
+
+            quote = await getQuote(quoteTxt);
+
+            const newTitle = await getTitle(quote.title_id);
+            expect(newTitle.value).toBe(newTitleTxt);
+            expect(newTitle.type_id).toBe(3);
+            expect(newTitle.authors).toHaveLength(4);
+
+            expect(quote.authors).toHaveLength(0);
         });
 
-        const updatedQuote = await getQuote("Test Quote 3");
-        expect(updatedQuote.tags).toHaveLength(5);
+        test("and the authors are replaced by new authors", async () => {
+            const quoteTxt = "Test Quote 10";
+            const newTitleTxt = "New Title 10";
 
-        const numLivingTags = await countElems("Tag", [ "New Tag 2", "New Tag 5" ]);
-        expect(numLivingTags).toBe(2);
-    });
+            const details = {
+                quote: {
+                    text: quoteTxt,
+                    title_id: null
+                },
+                authors: [
+                    { id: authorIds["New Author 6"], value: "New Author 6" },
+                    { id: authorIds["New Author 7"], value: "New Author 7" },
+                    { id: authorIds["New Author 8"], value: "New Author 8" }
+                ],
+                tags: []
+            };
 
-    test("remove all tags again", async () => {
-        tagIds = {
-            ...tagIds,
-            ...(await getTagIds([ 16, 17, 18 ].map(num => `New Tag ${num}`)))
-        };
+            await Quote.createQuote(details);
 
-        await Quote.updateQuote(id, {
-            tags: []
+            let quote = await getQuote(quoteTxt);
+
+            await Quote.updateQuote(quote.id, {
+                title_id: -1,
+                title: {
+                    value: newTitleTxt,
+                    type_id: 4
+                },
+                authors: [
+                    { id: -1, value: "New Author 12" }
+                ]
+            });
+
+            authorIds = {
+                ...authorIds,
+                ...(await getElemIds(db.Author, [ "New Author 12" ]))
+            };
+
+            quote = await getQuote(quoteTxt);
+
+            const newTitle = await getTitle(quote.title_id);
+            expect(newTitle.value).toBe(newTitleTxt);
+            expect(newTitle.type_id).toBe(4);
+            expect(newTitle.authors).toHaveLength(1);
+
+            expect(quote.authors).toHaveLength(0);
         });
 
-        const updatedQuote = await getQuote("Test Quote 3");
-        expect(updatedQuote.tags).toHaveLength(0);
+        test("and the authors go from zero to a bunch of existing authors", async () => {
+            const quoteTxt = "Test Quote 11";
+            const newTitleTxt = "New Title 11";
 
-        const numLivingTags = await countElems("Tag", [ "New Tag 4" ]);
-        expect(numLivingTags).toBe(1);
+            const details = {
+                quote: {
+                    text: quoteTxt,
+                    title_id: null
+                },
+                authors: [],
+                tags: []
+            };
 
-        const numZombieTags = await countElems("Tag", [ 15, 16, 17, 18 ].map(num => `New Tag ${num}`));
-        expect(numZombieTags).toBe(0);
+            await Quote.createQuote(details);
+
+            let quote = await getQuote(quoteTxt);
+
+            await Quote.updateQuote(quote.id, {
+                title_id: -1,
+                title: {
+                    value: newTitleTxt
+                },
+                authors: [
+                    { id: authorIds["New Author 2"], value: "New Author 2" },
+                    { id: authorIds["New Author 7"], value: "New Author 7" },
+                    { id: authorIds["New Author 10"], value: "New Author 10" }
+                ]
+            });
+
+            quote = await getQuote(quoteTxt);
+
+            const newTitle = await getTitle(quote.title_id);
+            expect(newTitle.value).toBe(newTitleTxt);
+            expect(newTitle.type_id).toBeNull();
+            expect(newTitle.authors).toHaveLength(3);
+
+            expect(quote.authors).toHaveLength(0);
+        });
+
+        test("and the authors are replaced by a mix of new and existing authors", async () => {
+            const quoteTxt = "Test Quote 12";
+            const newTitleTxt = "New Title 12";
+
+            const details = {
+                quote: {
+                    text: quoteTxt,
+                    title_id: null
+                },
+                authors: [
+                    { id: authorIds["New Author 1"], value: "New Author 1" },
+                    { id: authorIds["New Author 4"], value: "New Author 4" }
+                ],
+                tags: []
+            };
+
+            await Quote.createQuote(details);
+
+            let quote = await getQuote(quoteTxt);
+
+            await Quote.updateQuote(quote.id, {
+                title_id: -1,
+                title: {
+                    value: newTitleTxt
+                },
+                authors: [
+                    { id: authorIds["New Author 5"], value: "New Author 5" },
+                    { id: authorIds["New Author 10"], value: "New Author 10" },
+                    { id: -1, value: "New Author 13" },
+                    { id: -1, value: "New Author 14" },
+                    { id: -1, value: "New Author 15" }
+                ]
+            });
+
+            authorIds = {
+                ...authorIds,
+                ...(await getElemIds(db.Author, [ "New Author 13", "New Author 14", "New Author 15" ]))
+            };
+
+            quote = await getQuote(quoteTxt);
+
+            const newTitle = await getTitle(quote.title_id);
+            expect(newTitle.value).toBe(newTitleTxt);
+            expect(newTitle.type_id).toBeNull();
+            expect(newTitle.authors).toHaveLength(5);
+
+            expect(quote.authors).toHaveLength(0);
+        });
+
+        test("and the authors are reduced to a subset, and one zombie is produced as a result", async () => {
+            const quoteTxt = "Test Quote 13";
+            const newTitleTxt = "New Title 13";
+
+            const details = {
+                quote: {
+                    text: quoteTxt,
+                    title_id: null
+                },
+                authors: [
+                    { id: authorIds["New Author 3"], value: "New Author 3" },
+                    { id: authorIds["New Author 5"], value: "New Author 5" },
+                    { id: authorIds["New Author 9"], value: "New Author 9" },
+                    { id: -1, value: "New Author 16" }
+                ],
+                tags: []
+            };
+
+            await Quote.createQuote(details);
+
+            authorIds = {
+                ...authorIds,
+                ...(await getElemIds(db.Author, [ "New Author 16" ]))
+            };
+
+            let quote = await getQuote(quoteTxt);
+
+            await Quote.updateQuote(quote.id, {
+                title_id: -1,
+                title: {
+                    value: newTitleTxt,
+                    type_id: 5
+                },
+                authors: [
+                    { id: authorIds["New Author 3"], value: "New Author 3" },
+                    { id: authorIds["New Author 9"], value: "New Author 9" }
+                ]
+            });
+
+            quote = await getQuote(quoteTxt);
+
+            const newTitle = await getTitle(quote.title_id);
+            expect(newTitle.value).toBe(newTitleTxt);
+            expect(newTitle.type_id).toBe(5);
+            expect(newTitle.authors).toHaveLength(2);
+
+            expect(quote.authors).toHaveLength(0);
+
+            const numZombieAuthors = await countElems("Author", "New Author 16");
+            expect(numZombieAuthors).toBe(0);
+        });
+
+        test("and the authors are replaced by a subset and a mix of new and existing authors", async () => {
+            const quoteTxt = "Test Quote 14";
+            const newTitleTxt = "New Title 14";
+
+            const details = {
+                quote: {
+                    text: quoteTxt,
+                    title_id: null
+                },
+                authors: [
+                    { id: authorIds["New Author 10"], value: "New Author 10" },
+                    { id: authorIds["New Author 13"], value: "New Author 13" },
+                    { id: authorIds["New Author 2"], value: "New Author 2" },
+                    { id: authorIds["New Author 6"], value: "New Author 6" },
+                    { id: -1, value: "New Author 17" },
+                    { id: -1, value: "New Author 18" },
+                    { id: -1, value: "New Author 19" }
+                ],
+                tags: []
+            };
+
+            await Quote.createQuote(details);
+
+            authorIds = {
+                ...authorIds,
+                ...(await getElemIds(db.Author, [ "New Author 17", "New Author 18", "New Author 19" ]))
+            };
+
+            let quote = await getQuote(quoteTxt);
+
+            await Quote.updateQuote(quote.id, {
+                title_id: -1,
+                title: {
+                    value: newTitleTxt
+                },
+                authors: [
+                    { id: authorIds["New Author 10"], value: "New Author 10" },
+                    { id: authorIds["New Author 6"], value: "New Author 6" },
+                    { id: authorIds["New Author 18"], value: "New Author 18" },
+                    { id: authorIds["New Author 4"], value: "New Author 4" },
+                    { id: -1, value: "New Author 20" }
+                ]
+            });
+
+            authorIds = {
+                ...authorIds,
+                ...(await getElemIds(db.Author, [ "New Author 20" ]))
+            };
+
+            quote = await getQuote(quoteTxt);
+
+            const newTitle = await getTitle(quote.title_id);
+            expect(newTitle.value).toBe(newTitleTxt);
+            expect(newTitle.type_id).toBeNull();
+            expect(newTitle.authors).toHaveLength(5);
+
+            expect(quote.authors).toHaveLength(0);
+        });
+
+        test("check that no authors were unduly removed at any point", async () => {
+            let allAuthors = [];
+            const TOTAL_NUM_AUTHORS = 20;
+            for(let i = 1; i <= TOTAL_NUM_AUTHORS; i++)
+                allAuthors.push(`New Author ${i}`);
+            
+            const numAuthors = await countElems("Author", allAuthors);
+            expect(numAuthors).toBe(TOTAL_NUM_AUTHORS - 3); // -3 because in the last two tests three zombie authors are created
+        });
     });
 });
 

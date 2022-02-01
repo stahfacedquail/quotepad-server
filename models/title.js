@@ -33,6 +33,7 @@ const getTitles = (req, res) => {
 };
 
 const createTitle = (props, transaction) => {
+    if(props.type_id && typeof props.type_id != 'number') delete props.type_id;
     return new db.Title().save(props, { transacting: transaction });
 };
 
