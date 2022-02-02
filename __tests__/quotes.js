@@ -1284,7 +1284,7 @@ describe("Updates a quote", () => {
     });
 });
 
-describe.only("Updates a quote by changing its title and/or authors", () => {
+describe("Updates a quote by changing its title and/or authors", () => {
     beforeAll(() => resetDb());
 
     let authorIds = {};
@@ -1936,6 +1936,381 @@ describe.only("Updates a quote by changing its title and/or authors", () => {
             const numAuthors = await countElems("Author", allAuthors);
             expect(numAuthors).toBe(TOTAL_NUM_AUTHORS - 3); // -3 because in the last two tests three zombie authors are created
         });
+    });
+
+    describe.only("where the title changes from null to something existing", () => {
+        let authorIds = {};
+
+        test("and the title's quotes are currently unaligned (and thus continue to be unaligned after the update)", async () => {
+            const titleTxt = "New Title 15";
+
+            let quote1 = {
+                quote: {
+                    text: "Test Quote 15",
+                    title_id: -1
+                },
+                title: {
+                    value: titleTxt
+                },
+                authors: [],
+                tags: []
+            };
+
+            await Quote.createQuote(quote1);
+
+            quote1 = await getQuote("Test Quote 15");
+
+            let quote2 = {
+                quote: {
+                    text: "Test Quote 16",
+                    title_id: quote1.title_id
+                },
+                title: {
+                    value: titleTxt
+                },
+                authors: [
+                    { id: -1, value: "New Author 21" },
+                    { id: -1, value: "New Author 22" }
+                ],
+                tags: []
+            };
+
+            let quote3 = {
+                quote: {
+                    text: "Test Quote 17",
+                    title_id: quote1.title_id
+                },
+                title: {
+                    value: titleTxt
+                },
+                authors: [
+                    { id: -1, value: "New Author 21" }
+                ],
+                tags: []
+            };
+
+            let quote4 = {
+                quote: {
+                    text: "Test Quote 18",
+                    title_id: null
+                },
+                authors: [],
+                tags: []
+            };
+
+            await Promise.all([
+                Quote.createQuote(quote2),
+                Quote.createQuote(quote3),
+                Quote.createQuote(quote4)
+            ]);
+
+            authorIds = {
+                ...authorIds,
+                ...(await getElemIds(db.Author, [ "New Author 21", "New Author 22" ]))
+            };
+
+            quote4 = await getQuote("Test Quote 18");
+
+            await Quote.updateQuote(quote4.id, {
+                title_id: quote1.title_id,
+                authors: [
+                    { id: authorIds["New Author 21"], value: "New Author 21" },
+                    { id: authorIds["New Author 22"], value: "New Author 22" }
+                ]
+            });
+
+            quote4 = await getQuote("Test Quote 18");
+
+            expect(quote4.title.value).toBe(titleTxt);
+            expect(quote4.authors).toHaveLength(2);
+            
+            let title = await getTitle(quote4.title_id);
+            expect(title.authors).toHaveLength(0);
+
+            let quote5 = {
+                quote: {
+                    text: "Test Quote 19",
+                    title_id: null
+                },
+                authors: [
+                    { id: -1, value: "New Author 23" }
+                ],
+                tags: []
+            };
+
+            await Quote.createQuote(quote5);
+
+            authorIds = {
+                ...authorIds,
+                ...(await getElemIds(db.Author, [ "New Author 23" ]))
+            };
+
+            quote5 = await getQuote("Test Quote 19");
+
+            await Quote.updateQuote(quote5.id, {
+                title_id: quote1.title_id,
+                authors: [
+                    { id: authorIds["New Author 23"], value: "New Author 23" }
+                ]
+            });
+
+            quote5 = await getQuote("Test Quote 19");
+
+            expect(quote5.title.value).toBe(titleTxt);
+            expect(quote5.authors).toHaveLength(1);
+            
+            title = await getTitle(quote5.title_id);
+            expect(title.authors).toHaveLength(0);
+        });
+
+        describe("and the title's quotes are currently aligned but an update causes them to become unaligned (Part I)", () => {
+            beforeAll(() => {
+                let quote = {
+                    quote: {
+                        text: "Test Quote 20",
+                        title_id: -1
+                    },
+                    title: {
+                        value: "New Title 16"
+                    },
+                    authors: [
+                        { id: authorIds["New Author 21"], value: "New Author 21" },
+                        { id: authorIds["New Author 22"], value: "New Author 22" },
+                        { id: authorIds["New Author 23"], value: "New Author 23" }
+                    ],
+                    tags: []
+                };
+
+                return Quote.createQuote(quote)
+                .then(async () => {
+                    quote = await getQuote("Test Quote 20");
+
+                    const group = [21, 22, 23, 24].map(n => Quote.createQuote({
+                        quote: {
+                            text: `Test Quote ${n}`,
+                            title_id: quote.title_id
+                        },
+                        title: {
+                            id: quote.title_id,
+                            value: "New Title 16"
+                        },
+                        authors: [
+                            { id: authorIds["New Author 21"], value: "New Author 21" },
+                            { id: authorIds["New Author 22"], value: "New Author 22" },
+                            { id: authorIds["New Author 23"], value: "New Author 23" }
+                        ],
+                        tags: []
+                    }));
+
+                    return Promise.all(group);
+                });
+            });
+
+            let currentTitleId;
+
+            test("where the updated quote comes in with zero authors", async () => {
+                let quote1 = {
+                    quote: {
+                        text: "Test Quote 25",
+                        title_id: null
+                    },
+                    authors: [],
+                    tags: []
+                };
+
+                await Quote.createQuote(quote1);
+
+                quote1 = await getQuote("Test Quote 25");
+
+                currentTitleId = (await getElemIds(db.Title, [ "New Title 16" ]))["New Title 16"];
+
+                await Quote.updateQuote(quote1.id, {
+                    title_id: currentTitleId,
+                    title: {
+                        id: currentTitleId,
+                        value: "New Title 16"
+                    },
+                    authors: [],
+                });
+
+                quote1 = await getQuote("Test Quote 25");
+                let title = await getTitle(currentTitleId);
+
+                expect(quote1.title_id).toBe(currentTitleId);
+                expect(quote1.authors).toHaveLength(0);
+                expect(title.authors).toHaveLength(0);
+
+                [20, 21, 22, 23, 24].map(async n => {
+                    let quote = await getQuote(`Test Quote ${n}`);
+                    expect(quote.authors).toHaveLength(3);
+                });
+
+                await Quote.deleteQuote(quote1.id);
+            });
+
+            test("where the updated quote comes in with a subset of the authors", async () => {
+                let quote = {
+                    quote: {
+                        text: "Test Quote 26",
+                        title_id: null
+                    },
+                    authors: [
+                        { id: authorIds["New Author 21"], value: "New Author 21" },
+                        { id: authorIds["New Author 22"], value: "New Author 22" }
+                    ],
+                    tags: []
+                };
+
+                await Quote.createQuote(quote);
+
+                quote = await getQuote("Test Quote 26");
+
+                await Quote.updateQuote(quote.id, {
+                    title_id: currentTitleId,
+                    authors: [
+                        { id: authorIds["New Author 22"], value: "New Author 22" }
+                    ]
+                });
+
+                quote = await getQuote("Test Quote 26");
+                const title = await getTitle(currentTitleId);
+
+                expect(quote.title_id).toBe(currentTitleId);
+                expect(quote.authors).toHaveLength(1);
+                expect(title.authors).toHaveLength(0);
+
+                await Quote.deleteQuote(quote.id);
+            });
+
+            test("where the updated quote comes in with all the authors + more", async () => {
+                let quote = {
+                    quote: {
+                        text: "Test Quote 27",
+                        title_id: null
+                    },
+                    authors: [
+                        { id: -1, value: "New Author 24" }
+                    ],
+                    tags: []
+                };
+
+                await Quote.createQuote(quote);
+
+                authorIds = {
+                    ...authorIds,
+                    ...(await getElemIds(db.Author, [ "New Author 24" ]))
+                };
+
+                quote = await getQuote("Test Quote 27");
+
+                await Quote.updateQuote(quote.id, {
+                    title_id: currentTitleId,
+                    authors: [21, 22, 23, 24].map(n => ({
+                        id: authorIds[`New Author ${n}`],
+                        value: `New Author ${n}`
+                    }))
+                });
+
+                quote = await getQuote("Test Quote 27");
+                title = await getTitle(currentTitleId);
+
+                expect(quote.authors).toHaveLength(4);
+                expect(quote.title_id).toBe(currentTitleId);
+                expect(title.authors).toHaveLength(0);
+
+                await Quote.deleteQuote(quote.id);
+
+                delete authorIds["New Author 24"]; // zombie author
+            });
+
+            test("where the updated quote comes in with completely different authors", async () => {
+                let quote = {
+                    quote: {
+                        text: "Test Quote 28",
+                        title_id: null
+                    },
+                    authors: [
+                        { id: -1, value: "New Author 24" },
+                        { id: -1, value: "New Author 25" }
+                    ],
+                    tags: []
+                };
+
+                await Quote.createQuote(quote);
+
+                authorIds = {
+                    ...authorIds,
+                    ...(await getElemIds(db.Author, [ "New Author 24", "New Author 25" ]))
+                };
+
+                quote = await getQuote("Test Quote 28");
+
+                await Quote.updateQuote(quote.id, {
+                    title_id: currentTitleId,
+                    authors: [
+                        { id: authorIds["New Author 24"], value: "New Author 24" },
+                        { id: -1, value: "New Author 26" }
+                    ]
+                });
+
+                quote = await getQuote("Test Quote 28");
+                title = await getTitle(currentTitleId);
+
+                expect(quote.title_id).toBe(currentTitleId);
+                expect(quote.authors).toHaveLength(2);
+                expect(title.authors).toHaveLength(0);
+
+                await Quote.deleteQuote(quote.id);
+            });
+
+            afterEach(async () => { // smallanyana cheating; testing coalescence
+                [20, 21, 22, 23, 24].map(async n => {
+                    let quote = await getQuote(`Test Quote ${n}`);
+                    expect(quote.authors).toHaveLength(0);
+                });
+
+                const title = await getTitle(currentTitleId)
+                expect(title.authors).toHaveLength(3);
+            });
+        });
+
+        // describe("and the title's quotes are currently aligned but an update causes them to become unaligned (Part II)", () => {
+        //     beforeAll(() => {
+        //         let quote = {
+        //             quote: {
+        //                 text: "Test Quote 29",
+        //                 title_id: -1
+        //             },
+        //             title: {
+        //                 value: "New Title 17"
+        //             },
+        //             authors: [],
+        //             tags: []
+        //         };
+
+        //         return Quote.createQuote(quote)
+        //         .then(async () => {
+        //             quote = await getQuote("Test Quote 29");
+
+        //             const group = [30, 31].map(n => Quote.createQuote({
+        //                 quote: {
+        //                     text: `Test Quote ${n}`,
+        //                     title_id: quote.title_id
+        //                 },
+        //                 title: {
+        //                     id: quote.title_id,
+        //                     value: "New Title 17"
+        //                 },
+        //                 authors: [],
+        //                 tags: []
+        //             }));
+
+        //             return Promise.all(group);
+        //         });
+        //     });
+
+        //     test("")
+        // });
     });
 });
 
